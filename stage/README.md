@@ -65,6 +65,7 @@ One JSON object per line, on standard input or the local socket:
 | `{"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}` | Show a picture from the overlay folder (`--overlays`, by default `overlays` beside the socket) over the character, in a slot (one picture each, fading in and out); `"image": null` fades it out. Anchors: `top`, `bottom`, `center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`. The core draws captions, the microphone-off sign and hints this way (`src/overlay.rs`) |
 | `{"screen": "dim"}` | `on`, `dim` or `off`: a dark veil over everything; `off` also stops moving and drawing the character, to save power |
 | `{"model_motions": 0.5}` | How much of a Live2D-format model's own idle motions shows, 0 (off) to 1 (as made); eased in. Also `--model-motions` and the settings file's `model_motions` (`src/live2d_motion.rs`) |
+| `{"live": {"head_yaw": 0.3, "smile": 0.6}}` | A person's movement, live (a phone tracking them): the named controls (the motion library's, in its units) follow, smoothly between updates, over the character's own movement; the rest keep its own. It starts no gestures or idle actions by itself meanwhile. `null`, or half a second without an update, hands the controls back over a third of a second (`src/live.rs`) |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.

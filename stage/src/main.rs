@@ -9,6 +9,7 @@ mod behaviour;
 mod capture;
 mod control;
 mod director;
+mod live;
 mod live2d;
 mod live2d_motion;
 mod mapping;
@@ -525,6 +526,8 @@ struct StageApp {
 	expressions: Vec<live2d::Expression>,
 	expression_weights: Vec<(smooth::Spring, f32)>,
 	overrides: Overrides,
+	/// A person's movement, live (live.rs).
+	live: live::Live,
 	commands: Receiver<Command>,
 	script: Option<Script>,
 	events: Events,
@@ -724,6 +727,7 @@ impl StageApp {
 					}
 				}
 			}
+			Command::Live(values) => self.live.set(&values),
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -1103,7 +1107,9 @@ impl App for StageApp {
 			}
 		}
 		let mut pose = self.behaviour.update(dt);
-		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
+		// While a person moves it live, the character starts no gestures or idle actions of its own.
+		let own_motion = !self.opts.still && !self.live.is_on();
+		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), own_motion) {
 			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
 		}
 		if let Puppet::Vrm(p) = &mut self.puppet {
@@ -1119,6 +1125,7 @@ impl App for StageApp {
 			}
 		}
 		self.speech.apply(dt, self.behaviour.state() == State::Speaking, &mut pose);
+		self.live.apply(dt, &mut pose);
 		let mut values = self.mapper.resolve(&pose);
 		self.own_motion(dt, direction.resting, &mut values);
 		self.overrides.apply(dt, &mut values);
@@ -1347,6 +1354,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 	};
 	let app = StageApp {
 		overrides: Overrides::new(&info.params),
+		live: live::Live::default(),
 		behaviour,
 		motion,
 		speech: speech::Speech::new(),

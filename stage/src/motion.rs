@@ -36,7 +36,8 @@ pub const KEYS: [&str; 21] = [
 	"mouth_open", "blink", "head_turn",
 ];
 
-fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
+/// The pose's value for a control (an index into KEYS).
+pub fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
 	match KEYS[key] {
 		"head_yaw" => &mut pose.head_yaw,
 		"head_pitch" => &mut pose.head_pitch,

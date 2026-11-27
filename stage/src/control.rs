@@ -30,6 +30,8 @@
 //! {"overlay": {"slot": "caption", "image": null}}
 //! {"screen": "dim"}
 //! {"model_motions": 0.5}
+//! {"live": {"head_yaw": 0.3, "smile": 0.6}}
+//! {"live": null}
 //! {"quit": true}
 //! ```
 //!
@@ -56,6 +58,9 @@
 //!
 //! `model_motions` is how much of a Live2D-format model's own idle motions shows, 0 (off) to 1 (as its
 //! artist made them). See live2d_motion.rs.
+//!
+//! `live` moves the named controls (the motion library's) as a person tracked by a phone does, until
+//! updates stop or `null` comes. See live.rs.
 //!
 //! A script line also carries `"at": seconds`.
 
@@ -119,6 +124,8 @@ pub enum Command {
 	Screen(Screen),
 	/// How much of a Live2D-format model's own idle motions shows, 0 to 1.
 	ModelMotions(f32),
+	/// A person's movement, live: controls (indices into motion::KEYS) and values. Empty: it ends.
+	Live(Vec<(usize, f32)>),
 	Quit,
 }
 
@@ -208,6 +215,18 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 					val.get(key).and_then(Value::as_f64).map(|v| v.clamp(0.4, 1.6) as f32).ok_or(format!("\"temperament\" needs \"{key}\""))
 				};
 				out.push(Command::Temperament(number("energy")?, number("expressiveness")?));
+			}
+			"live" => {
+				let mut values = Vec::new();
+				if !val.is_null() {
+					let items = val.as_object().ok_or("\"live\" must be an object of controls and values, or null")?;
+					for (name, v) in items {
+						let key = crate::live::key(name).ok_or(format!("there is no control called {name}"))?;
+						let x = v.as_f64().filter(|x| x.is_finite()).ok_or("a \"live\" value must be a number")?;
+						values.push((key, x as f32));
+					}
+				}
+				out.push(Command::Live(values));
 			}
 			"define" => {
 				if !val.is_object() {
@@ -462,6 +481,17 @@ mod tests {
 		] {
 			assert!(parse_line(bad).is_err(), "{bad}");
 		}
+	}
+
+	#[test]
+	fn parses_live_movement() {
+		let (_, c) = parse_line(r#"{"live": {"head_yaw": 0.25, "smile": 1}}"#).unwrap();
+		assert_eq!(c, vec![Command::Live(vec![(0, 0.25), (10, 1.0)])]);
+		let (_, c) = parse_line(r#"{"live": null}"#).unwrap();
+		assert_eq!(c, vec![Command::Live(vec![])]);
+		assert!(parse_line(r#"{"live": {"tail": 1}}"#).is_err(), "only the library's controls");
+		assert!(parse_line(r#"{"live": {"smile": "big"}}"#).is_err());
+		assert!(parse_line(r#"{"live": [0.1]}"#).is_err());
 	}
 
 	#[test]
