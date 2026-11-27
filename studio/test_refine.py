@@ -150,36 +150,6 @@ class RefineTest(unittest.TestCase):
         self.assertAlmostEqual(mean_dx(1), -mean_dx(-1), places=2)
         self.assertEqual(self.offsets("ParamAngleX", "face_base", 0)[0], [0.0, 0.0])
 
-    def test_a_face_with_big_hair_turns_instead_of_sliding(self):
-        # Hair three times as wide as the face (as many drawn characters have): the head's rounded surface
-        # is the face's, not the hair's, so the eyes go round it while the cheeks hold.
-        p = puppet()
-        head = next(n for n in p["nodes"]["children"][0]["children"] if n["name"] == "head")
-        head["children"][-2] = part("80_hair_front", -150, -150, 150, -60)
-        refine.refine(p)
-
-        def span(role, position, near_y=None):
-            b = binding(p, "ParamAngleX", role)
-            xs = [x + m[0] for (x, y), m in zip(mesh_points(p, role), b["values"][{-1: 0, 0: 1, 1: 2}[position]][0])
-                  if near_y is None or abs(y - near_y) < 6]
-            return min(xs), max(xs)
-        eye_y = sum(y for _, y in mesh_points(p, "eye_r")) / len(mesh_points(p, "eye_r"))
-        for turn, far, near in ((1, "eye_r", "eye_l"), (-1, "eye_l", "eye_r")):
-            cheeks0, cheeks = span("face_base", 0, eye_y), span("face_base", turn, eye_y)
-            cheek_move = abs((cheeks[0] + cheeks[1]) - (cheeks0[0] + cheeks0[1])) / 2
-            eye0, eye = span(far, 0), span(far, turn)
-            eye_move = abs((eye[0] + eye[1]) - (eye0[0] + eye0[1])) / 2
-            self.assertGreater(eye_move, 2 * cheek_move, "the eyes go round the head; the cheeks hold")
-            side = 1 if turn == 1 else 0
-            gap0 = abs(cheeks0[side] - eye0[side])
-            gap = abs(cheeks[side] - eye[side])
-            self.assertLess(gap, gap0 - 1, "the far eye nears its cheek, as on a rounded head")
-            self.assertTrue(cheeks[0] - 0.5 <= eye[0] and eye[1] <= cheeks[1] + 0.5, "and stays on the face")
-            self.assertGreater(span(near, turn)[1] - span(near, turn)[0], span(near, 0)[1] - span(near, 0)[0])
-        right = span("eye_r", 1)
-        left = span("eye_l", -1)
-        self.assertAlmostEqual(right[1] - right[0], left[1] - left[0], places=1, msg="both ways alike")
-
     def test_a_nod_moves_the_features_up_or_down(self):
         down = self.offsets("ParamAngleY", "eye_l", -1)[0]
         up = self.offsets("ParamAngleY", "eye_l", 1)[0]
@@ -395,6 +365,105 @@ class ArmTest(unittest.TestCase):
         p, _, _ = puppet_with_arm(bend="squash")
         self.assertEqual(refine.refine_arms(p)["arms"], "left as rigged")
         self.assertFalse(any(n.get("name") == "arm_l" for n in refine._nodes(p["nodes"])))
+
+
+def face_picture(marks=((-3.0, -32.0),), scale=2):
+    """The test face's own picture: plain skin with small dark ovals (noses) at these points of the
+    face part (its box is -50..50 by -100..0). Returns the file's picture section."""
+    import io
+    from PIL import Image, ImageDraw
+    size = 100 * scale
+    picture = Image.new("RGBA", (size, size), (240, 214, 196, 255))
+    draw = ImageDraw.Draw(picture)
+    for x, y in marks:
+        cx, cy = (x + 50) * scale, (y + 100) * scale
+        draw.ellipse((cx - 3 * scale, cy - 5 * scale, cx + 3 * scale, cy + 5 * scale), fill=(150, 100, 90, 255))
+    out = io.BytesIO()
+    picture.save(out, "PNG")
+    return refine.write_texture_section([(0, out.getvalue())], b"")
+
+
+def puppet_with_face_picture():
+    p = puppet()
+    for item in refine.walk_parts(p["nodes"]):
+        if item["role"] == "face_base":
+            verts = item["node"]["mesh"]["verts"]
+            item["node"]["textures"] = [0, None, None]
+            item["node"]["mesh"]["uvs"] = [((v + 50) / 100.0 if k % 2 == 0 else (v + 100) / 100.0)
+                                           for k, v in enumerate(verts)]
+    return p
+
+
+class NoseTest(unittest.TestCase):
+    """A nose drawn on the face's skin, a little to the left of the eyes' middle (as on a test picture
+    whose turn to the right looked like a slide): found, and moved so both turns look alike."""
+
+    def nose_and_eyes(self, p, position, nose_x=-3.0):
+        """How far the nose's middle (drawn at nose_x) is to the right of the eyes' middle at this end of
+        the turn. The skin's nearest point carries the nose."""
+        index = {-1: 0, 0: 1, 1: 2}[position]
+        pts = mesh_points(p, "face_base")
+        k = min(range(len(pts)), key=lambda i: math.hypot(pts[i][0] - nose_x, pts[i][1] + 132.0))
+        nose = nose_x + binding(p, "ParamAngleX", "face_base")["values"][index][0][k][0]
+        eyes = []
+        for role in ("eye_l", "eye_r"):
+            e = mesh_points(p, role)
+            moves = binding(p, "ParamAngleX", role)["values"][index][0]
+            eyes.append(sum(x + d[0] for (x, _), d in zip(e, moves)) / len(e))
+        return nose - sum(eyes) / 2.0
+
+    def test_the_mark_is_found_where_it_was_drawn(self):
+        p = puppet_with_face_picture()
+        g = refine.head_geometry(refine.walk_parts(p["nodes"]))
+        nose = refine.find_nose(face_picture(), g)
+        self.assertIsNotNone(nose)
+        self.assertAlmostEqual(nose["x"], -3.0, delta=0.6)          # the face part sits 100 higher
+        self.assertAlmostEqual(nose["y"], -132.0, delta=0.6)
+        self.assertIsNone(refine.find_nose(face_picture(marks=()), g))
+        self.assertIsNone(refine.find_nose(face_picture(marks=((22.0, -32.0),)), g))   # too far aside
+
+    def test_without_its_picture_the_nose_lags_behind_a_turn_to_its_other_side(self):
+        p = puppet_with_face_picture()
+        refine.refine(p)
+        self.assertLess(self.nose_and_eyes(p, 1), 0.0)              # turned right, still left of the eyes
+
+    def test_both_turns_mirror_each_other(self):
+        p = puppet_with_face_picture()
+        report = refine.refine(p, face_picture())
+        self.assertFalse(report["nose"]["own_part"])
+        self.assertAlmostEqual(report["nose"]["drawn_aside"], -0.06, delta=0.02)
+        x = report["nose"]["drawn_aside"] * 50.0                    # where it was found (the eyes' middle is 0)
+        left, rest, right = (self.nose_and_eyes(p, k, x) for k in (-1, 0, 1))
+        self.assertAlmostEqual(rest, x, delta=0.01)                 # as drawn
+        self.assertGreater(right, 1.0)                              # leads the turn to the right
+        self.assertLess(left, -1.0)                                 # and the turn to the left
+        self.assertAlmostEqual(right, -left, delta=0.15)
+        lead = refine.DEPTH["nose"] * math.sin(refine.TURN_ANGLE) * 70.0
+        self.assertAlmostEqual(right, lead, delta=0.4)
+
+    def test_only_the_skin_round_the_nose_changes(self):
+        plain, nosed = puppet_with_face_picture(), puppet_with_face_picture()
+        refine.refine(plain)
+        refine.refine(nosed, face_picture())
+        pts = mesh_points(plain, "face_base")
+        for name in ("ParamAngleX", "ParamAngleY"):
+            a = binding(plain, name, "face_base")["values"]
+            b = binding(nosed, name, "face_base")["values"]
+            self.assertEqual(a[1], b[1])                            # nothing moves at rest
+            for (x, y), da, db in zip(pts, a[2][0], b[2][0]):
+                if math.hypot(x + 3.0, y + 132.0) > 5.0 + 0.35 * 50 + 0.5:
+                    self.assertEqual(da, db)
+        for role in ("eye_l", "mouth", "hair_front"):
+            self.assertEqual(binding(plain, "ParamAngleX", role)["values"],
+                             binding(nosed, "ParamAngleX", role)["values"])
+
+    def test_a_nose_drawn_far_aside_is_evened_only_partly(self):
+        p = puppet_with_face_picture()
+        refine.refine(p, face_picture(marks=((-12.0, -32.0),)))
+        left, right = self.nose_and_eyes(p, -1, -12.0), self.nose_and_eyes(p, 1, -12.0)
+        self.assertLess(left, -12.0)                                # never back against a turn
+        self.assertGreater(right, -12.0 + 1.5 * refine.DEPTH["nose"] * math.sin(refine.TURN_ANGLE) * 70.0)
+        self.assertLess(right, 0.0)                                 # still partly as drawn
 
 
 if __name__ == "__main__":

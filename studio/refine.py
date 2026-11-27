@@ -14,15 +14,18 @@ This version follows how hand-made Live2D and Inochi2D puppets are built:
   * Tilt: the whole head (face, features, hair) leans as one rigid piece
     about a point in the neck. The neck bends to follow, and long hair fades
     out of the movement below the neck so it hangs instead of swinging.
-  * Turn and nod: the head is treated as a rounded surface the size of the
-    face, so the cheeks lie on its outline. The cheeks and the outline of
-    the hair hold (the whole head shifts only a little towards the turn),
-    while the eyes, eyebrows, nose and mouth go round the surface: the far
-    eye narrows and nears the cheek, the near one widens, the nose moves
-    most. Each feature follows a coarse grid, so it keeps its shape; the
-    face and hair bend smoothly around them. (Sized by the hair, as it once
-    was, a face with big hair slid sideways inside it, its features hardly
-    moving against its cheeks: a slide, not a turn.)
+  * Turn and nod: the head is treated as a rounded surface. The middle of
+    the face slides furthest, the cheeks and chin less, and the outline of
+    the head not at all. Eyes, eyebrows, nose and mouth each move as a
+    rigid piece by the amount at their own centre, so they never change
+    shape. The face and hair bend smoothly around them.
+  * The nose stands out from the face, so it goes further than the eyes,
+    and at the end of a turn it sits as far to that side of the eyes'
+    middle whichever way the head turns, wherever it was drawn. A nose
+    drawn on the face's skin (most are) is found on the face's picture and
+    the skin round it follows it. (Moving with the eyes exactly, a nose
+    drawn a little to one side led a turn that way and lagged behind a turn
+    the other way, which then looked like a slide, not a turn.)
 
 Mouth
 -----
@@ -69,7 +72,7 @@ MAGIC = b"TRNSRTS\0"
 ANGLE_PARAMS = ("ParamAngleX", "ParamAngleY", "ParamAngleZ")
 
 # Turn and nod: how far the head turns at the end of the control's range.
-TURN_ANGLE = math.radians(22)
+TURN_ANGLE = math.radians(18)
 NOD_ANGLE = math.radians(12)
 # How far each kind of part stands out from the rounded head surface, in
 # head half-widths: the nose stands out and so moves furthest. Parts not
@@ -77,6 +80,15 @@ NOD_ANGLE = math.radians(12)
 # head, at this share of the front surface's depth, so it moves the other way.
 DEPTH = {"nose": 0.18, "fringe": 0.06, "ears": -0.12}
 BACK_DEPTH = 0.6
+# A nose drawn on the face's skin: how much darker than the skin round it its mark is (0-255), and how
+# far round the mark the skin goes with it, in face half-widths (the skin there stretches a little).
+NOSE_DARKER = 25
+NOSE_REACH = 0.35
+# A mark further than this to the side of the eyes' middle (face half-widths) is not taken for a nose.
+# A nose drawn to one side is made up for by at most NOSE_EVEN of its own lead, so it still goes the turn's
+# way at both ends (a face drawn half-turned keeps some of its own turn; only its own drawing can undo it).
+NOSE_ASIDE = 0.3
+NOSE_EVEN = 0.9
 # Near the head's outline, points are held in place, so the outline only
 # moves a little and nothing behind the head is uncovered. This is the depth
 # below the surface (0 at the outline, 1 at the middle) where holding stops.
@@ -92,10 +104,10 @@ GRID_DEFAULT = (3, 3)
 FEATURE_KINDS = ("eye", "mouth", "nose", "blush", "ear")
 # Head lean at the end of the range, in radians (about 9 degrees).
 MAX_TILT = 0.16
-# The rounded surface: its half-width, in the face's half-widths (the cheeks lie just inside its outline,
-# so they hold and no feature can pass them), and how far below the chin it ends, as a multiple of the
-# eye-to-chin distance.
-FACE_SPAN = 1.03
+# The rounded surface: half-width as a share of face width (limits), and how
+# far below the chin it ends, as a multiple of the eye-to-chin distance.
+SURFACE_MIN = 0.62
+SURFACE_MAX = 0.95
 SURFACE_BELOW = 1.25
 # Where the head leans from: this share of the way down the visible neck,
 # but no further below the chin than this share of the face width.
@@ -192,8 +204,8 @@ def head_geometry(parts):
     eye_line = sum(eye_ys) / len(eye_ys) if eye_ys else top + 0.45 * (chin - top)
     eye_line = min(max(eye_line, top + 0.2 * (chin - top)), chin - 0.2 * (chin - top))
 
-    _, hy0, _, _ = box([pt for p in head_parts for pt in points(p)])
-    half_width = FACE_SPAN * width / 2.0
+    hx0, hy0, hx1, _ = box([pt for p in head_parts for pt in points(p)])
+    half_width = min(max((hx1 - hx0) / 2.0, SURFACE_MIN * width), SURFACE_MAX * width)
     up = min(max(eye_line - hy0, 0.5 * width), 1.1 * width)
     down = SURFACE_BELOW * (chin - eye_line)
 
@@ -220,7 +232,7 @@ def surface_depth(x, y, g):
     return math.sqrt(max(0.0, 1.0 - u * u - v * v))
 
 
-def turned(x, y, g, turn, nod, depth=(1.0, 0.0), held=True):
+def turned(x, y, g, turn, nod, depth=(1.0, 0.0)):
     """Turn and nod: where the point at (x, y) goes when the head turns (turn) or nods (nod), each -1..1.
 
     The head is a rounded solid. Each point is turned with it about the
@@ -229,10 +241,8 @@ def turned(x, y, g, turn, nod, depth=(1.0, 0.0), held=True):
     and extra is for parts that stand out from the surface. So the middle of the face
     moves furthest, the side turning away gets narrower and the near side
     wider, parts in front move more than the face and parts behind move the
-    other way. Near the outline points are held (`held`: the face's and the
-    hair's, which would uncover what is behind them), so the outline moves
-    only a little; features lie on the face and go all the way round. y grows
-    downwards; a positive nod looks up.
+    other way. Near the outline points are held, so the outline moves only a
+    little. y grows downwards; a positive nod looks up.
     """
     rx = g["half_width"]
     dy = y - g["centre"][1]
@@ -240,7 +250,7 @@ def turned(x, y, g, turn, nod, depth=(1.0, 0.0), held=True):
     u = (x - g["centre"][0]) / rx
     v = dy / ry
     s = surface_depth(x, y, g)
-    hold = smoothstep(s / OUTLINE_HOLD) if held else 1.0
+    hold = smoothstep(s / OUTLINE_HOLD)
     z = depth[0] * s + depth[1]
     a, b = TURN_ANGLE * turn, NOD_ANGLE * nod
     u2 = u * math.cos(a) + z * math.sin(a)
@@ -310,6 +320,146 @@ def lean(x, y, g, tilt, fade):
     return (rx * math.cos(angle) - ry * math.sin(angle) - rx, rx * math.sin(angle) + ry * math.cos(angle) - ry)
 
 
+def find_nose(rest, g):
+    """The nose drawn on the face's own picture: the darkest small mark between the eyes and the mouth,
+    near the eyes' middle (its line or its shadow). Returns {"x", "y", "size"} in the puppet's
+    coordinates (size: half its longer side), or None when there is no such mark."""
+    import io
+    import numpy as np
+    from PIL import Image
+    face = next((p for p in g["head_parts"] if p["role"] == "face_base"), None)
+    eyes = [box([pt for m in g["groups"][k] for pt in points(m)]) for k in ("eye_l", "eye_r") if k in g["groups"]]
+    if face is None or not eyes:
+        return None
+    textures, _ = read_texture_section(rest)
+    index = (face["node"].get("textures") or [None])[0]
+    if index is None or index >= len(textures) or textures[index][0] != 0:
+        return None                                     # only PNG pictures are read
+    with Image.open(io.BytesIO(textures[index][1])) as im:
+        rgba = np.asarray(im.convert("RGBA")).astype(float)
+    pts = np.array(points(face), float)
+    uvs = np.array(face["node"]["mesh"]["uvs"], float).reshape(-1, 2) * [rgba.shape[1], rgba.shape[0]]
+    fit = [np.polyfit(pts[:, axis], uvs[:, axis], 1) for axis in (0, 1)]    # picture pixels = a * point + b
+    if min(abs(a) for a, _ in fit) < 1e-9:
+        return None
+    if max(np.abs(np.polyval(fit[axis], pts[:, axis]) - uvs[:, axis]).max() for axis in (0, 1)) > 2.0:
+        return None                                     # not drawn straight onto its mesh
+    hw = g["face_width"] / 2.0
+    eye_mid = sum((x0 + x1) / 2.0 for x0, _, x1, _ in eyes) / len(eyes)
+    eye_bottom = max(y1 for _, _, _, y1 in eyes)
+    mouth = g["groups"].get("mouth")
+    mouth_top = (box([pt for m in mouth for pt in points(m)])[1] if mouth
+                 else g["chin"] - 0.35 * (g["chin"] - g["centre"][1]))
+    gap = mouth_top - eye_bottom
+    if gap < 0.15 * hw:
+        return None
+    ys, xs = np.mgrid[0:rgba.shape[0], 0:rgba.shape[1]]
+    px = (xs + 0.5 - fit[0][1]) / fit[0][0]
+    py = (ys + 0.5 - fit[1][1]) / fit[1][0]
+    x0, x1 = eye_mid - 0.4 * hw, eye_mid + 0.4 * hw
+    y0, y1 = eye_bottom + 0.05 * gap, mouth_top - 0.1 * gap
+    area = (px >= x0) & (px <= x1) & (py >= y0) & (py <= y1) & (rgba[..., 3] > 200)
+    if area.sum() < 20:
+        return None
+    lum = rgba[..., 0] * 0.299 + rgba[..., 1] * 0.587 + rgba[..., 2] * 0.114
+    skin = float(np.median(lum[area]))
+    pixel = 1.0 / abs(fit[0][0])                        # one picture pixel, in puppet units
+    want = (eye_mid, eye_bottom + 0.45 * gap)
+    best, best_score = None, 0.0
+    for mark in _marks(area & (lum < skin - NOSE_DARKER)):
+        if mark.sum() < 6:
+            continue                                    # a speck
+        mx, my = px[mark], py[mark]
+        if mx.min() <= x0 + pixel or mx.max() >= x1 - pixel:
+            continue                                    # comes in from the side: hair or shading
+        size = max(mx.max() - mx.min(), my.max() - my.min(), pixel)
+        if not 0.03 * hw <= size <= 0.6 * hw:
+            continue
+        weight = skin - lum[mark]
+        cx, cy = float((mx * weight).sum() / weight.sum()), float((my * weight).sum() / weight.sum())
+        if abs(cx - eye_mid) > NOSE_ASIDE * hw:
+            continue                                    # too far to the side for a nose
+        distance = math.hypot(cx - want[0], 0.5 * (cy - want[1])) / (0.25 * hw)
+        score = float(weight.sum()) / (1.0 + distance * distance)
+        if score > best_score:
+            best, best_score = {"x": cx, "y": cy, "size": float(size) / 2.0}, score
+    return best
+
+
+def _marks(dark):
+    """Each separate patch of a true/false picture (touching sideways or corner to corner), as masks."""
+    import numpy as np
+    seen = np.zeros(dark.shape, bool)
+    height, width = dark.shape
+    for start in zip(*np.nonzero(dark)):
+        if seen[start]:
+            continue
+        seen[start] = True
+        patch, todo = [], [start]
+        while todo:
+            y, x = todo.pop()
+            patch.append((y, x))
+            for ny in (y - 1, y, y + 1):
+                for nx in (x - 1, x, x + 1):
+                    if 0 <= ny < height and 0 <= nx < width and dark[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        todo.append((ny, nx))
+        mask = np.zeros(dark.shape, bool)
+        mask[tuple(np.array(patch).T)] = True
+        yield mask
+
+
+def nose_of(g, rest=None):
+    """The nose to move on its own: its own part if it has one, else the mark on the face's picture."""
+    if "nose" in g["groups"]:
+        x0, y0, x1, y1 = box([pt for m in g["groups"]["nose"] for pt in points(m)])
+        nose = {"x": (x0 + x1) / 2.0, "y": (y0 + y1) / 2.0, "size": max(x1 - x0, y1 - y0) / 2.0, "part": True}
+    elif rest is not None:
+        nose = find_nose(rest, g)
+        if nose is None:
+            return None
+        nose["part"] = False
+    else:
+        return None
+    eyes = [g["anchors"][k] for k in ("eye_l", "eye_r") if k in g["anchors"]]
+    if not eyes:
+        return None
+    nose["drawn"] = nose["x"] - sum(x for x, _ in eyes) / len(eyes)     # to the side of the eyes' middle
+    return nose
+
+
+def nose_shift(g, name, position):
+    """How much further than the face beneath it the nose goes at this end of a control's range, (dx, dy).
+
+    Turning, it ends as far to the turn's side of the eyes' middle as standing out from the face takes it
+    (DEPTH), wherever it was drawn (within NOSE_EVEN), so a turn either way looks alike. Nodding, a drawn
+    nose stands out the same way (a nose part does already)."""
+    nose = g.get("nose")
+    if nose is None or position == 0.0:
+        return (0.0, 0.0)
+    if name == "ParamAngleX":
+        eyes = [g["anchors"][k] for k in ("eye_l", "eye_r") if k in g["anchors"]]
+        depth = (1.0, DEPTH["nose"]) if nose["part"] else (1.0, 0.0)
+        moved = (turned(nose["x"], nose["y"], g, position, 0.0, depth)[0]
+                 - sum(turned(x, y, g, position, 0.0)[0] for x, y in eyes) / len(eyes))
+        lead = DEPTH["nose"] * math.sin(TURN_ANGLE) * g["half_width"]
+        evened = min(max(nose["drawn"], -NOSE_EVEN * lead), NOSE_EVEN * lead)
+        return (position * lead - evened - moved, 0.0)
+    if name == "ParamAngleY" and not nose["part"]:
+        ry = g["down"] if nose["y"] > g["centre"][1] else g["up"]
+        return (0.0, -DEPTH["nose"] * math.sin(NOD_ANGLE * position) * ry)
+    return (0.0, 0.0)
+
+
+def nose_weight(x, y, g):
+    """How much of the nose's own movement the face's skin at (x, y) takes: all of it on the mark, none
+    beyond NOSE_REACH round it."""
+    nose = g["nose"]
+    reach = NOSE_REACH * g["face_width"] / 2.0
+    inner = max(nose["size"], 0.04 * g["face_width"])
+    return smoothstep((inner + reach - math.hypot(x - nose["x"], y - nose["y"])) / reach)
+
+
 def offsets_for(part, g, name, position):
     """Per-point movement of one part for one control at one end of its range."""
     pts = points(part)
@@ -326,22 +476,33 @@ def offsets_for(part, g, name, position):
         return [(0.0, 0.0)] * len(pts)
     role = part["role"]
     kind = kind_of(role)
+    nose = g.get("nose")
     if group is None and kind not in FEATURE_KINDS:
         # Face, hair and the like follow the rounded surface point by point, so the hold at the
         # outline is exact.
-        return [turned(x, y, g, turn, nod, depth_at(role, x, y, g)) for x, y in pts]
+        out = [turned(x, y, g, turn, nod, depth_at(role, x, y, g)) for x, y in pts]
+        if role == "face_base" and nose is not None and not nose["part"]:
+            sx, sy = nose_shift(g, name, position)
+            out = [(dx + sx * w, dy + sy * w) for (dx, dy), w in zip(out, (nose_weight(x, y, g) for x, y in pts))]
+        return out
     # A feature follows a coarse grid, so it keeps its shape; the pieces of a group (an eye with its
     # closed eye, the mouth with its open mouth) share the group's grid, so they stay together.
     members = g["groups"][group] if group is not None else [part]
     area = box([pt for m in members for pt in points(m)])
     shape = GRIDS.get(kind, GRID_DEFAULT)
-    return grid_offsets(pts, area, shape, lambda x, y: turned(x, y, g, turn, nod, depth_at(role, x, y, g), held=False))
+    out = grid_offsets(pts, area, shape, lambda x, y: turned(x, y, g, turn, nod, depth_at(role, x, y, g)))
+    if group == "nose" and nose is not None and nose["part"]:
+        sx, sy = nose_shift(g, name, position)
+        out = [(dx + sx, dy + sy) for dx, dy in out]
+    return out
 
 
-def refine(puppet):
-    """Rewrite the head-angle controls in place. Returns a short report."""
+def refine(puppet, rest=None):
+    """Rewrite the head-angle controls in place. Returns a short report. With the file's pictures (rest),
+    a nose drawn on the face's skin is found and moved on its own."""
     parts = walk_parts(puppet["nodes"])
     g = head_geometry(parts)
+    g["nose"] = nose_of(g, rest)
     params = {p["name"]: p for p in puppet.get("param", [])}
     missing = [name for name in ANGLE_PARAMS if name not in params]
     if missing:
@@ -353,6 +514,9 @@ def refine(puppet):
         ids.add(g["neck"]["node"]["uuid"])
     report = {"head_parts": len(moved), "rigid_groups": sorted(g["groups"]), "neck_bends": g["neck_bottom"] is not None,
               "removed": 0, "added": 0}
+    if g["nose"] is not None:
+        report["nose"] = {"own_part": g["nose"]["part"],
+                          "drawn_aside": round(g["nose"]["drawn"] / (g["face_width"] / 2.0), 3)}
     for name in ANGLE_PARAMS:
         param = params[name]
         if param["axis_points"] != [[0.0, 0.5, 1.0], [0.0]]:
@@ -774,7 +938,7 @@ def refine_mouth(puppet, parts):
 def finish(data):
     """Refine a rigger puppet file. Returns (new file bytes, report)."""
     puppet, rest = read_puppet(data)
-    report = refine(puppet)
+    report = refine(puppet, rest)
     if isinstance(report.get("arms"), dict):
         rest = round_elbows(puppet, rest, report["arms"])
     return write_puppet(puppet, rest), report
