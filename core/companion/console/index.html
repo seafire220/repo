@@ -366,6 +366,24 @@
       </div>
     </div>
 
+    <h2>Record a gesture with your phone</h2>
+    <p class="muted">Film yourself making a gesture, and the character learns to make it: a wave, a little dance, a
+      shrug, a nod of your own. Your phone needs to be on the same Wi-Fi as the device. The video stays on your phone:
+      only the movement found in it comes to the device.</p>
+    <p><button id="btn-rec-start">Show a QR code for my phone</button> <span id="rec-msg" class="error"></span></p>
+    <div id="rec-box" class="rec" hidden>
+      <img id="rec-qr" alt="A QR code that opens the recorder on your phone" width="200" height="200" hidden>
+      <div>
+        <p>Scan this with your phone's camera, or open this link on your phone:</p>
+        <p><a id="rec-link" target="_blank" rel="noopener"></a></p>
+        <p class="muted">Hard to scan? Go to <b id="rec-short"></b> on your phone and type the code
+          <b id="rec-code" class="code"></b>.</p>
+        <p id="rec-status"></p>
+        <p><button id="btn-rec-new" class="secondary small">New link</button>
+          <button id="btn-rec-end" class="secondary small">Stop</button></p>
+      </div>
+    </div>
+
     <h2>Change or add a gesture</h2>
     <p class="muted">Each gesture and idle action is a few tracks: a control (a head nod, the left arm, a smile) and
       its value over time, from -1 to 1, starting and ending at 0. Try a change on the device's screen before saving

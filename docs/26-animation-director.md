@@ -339,6 +339,71 @@ The result is printed, saved to a file, or sent to the device (`--send`),
 where it shows on the Animation tab. The character moves as the video
 shows, side for side.
 
+The conversion (landmarks to controls, then the clip) is the device's own
+`core/companion/mocap.py`, shared by both ways of recording.
+
+## Gestures from a phone
+
+The owner can record a gesture with a phone, with no app and no computer
+(`core/companion/phone_record.py`, the page `console/record.html` and
+`record.js`):
+
+1. **The link.** *Record a gesture with your phone* on the Animation tab
+   asks for one (`POST /api/record`, logged in). The device makes a
+   one-time code of six letters and digits, without the ones easily
+   confused (0, O, 1, I, L), and shows a QR code of
+   `http://<its Wi-Fi address>/r/<code>`, the link itself, and the short
+   address `/r` where the code can be typed instead. The Wi-Fi address
+   comes first because the settings page may be open over USB, which a
+   phone cannot reach. One link at a time; a new one ends the old one.
+2. **No login on the phone.** The code stands for one: the `/r/` pages and
+   requests need it and nothing else, for 30 minutes or until the owner
+   presses *Stop*. After 30 wrong codes in a minute none is accepted for a
+   minute, so codes cannot be found by trying them. The phone's requests
+   that change anything carry `X-Companion: 1` like the settings page's,
+   so a web page elsewhere cannot send them.
+3. **The camera.** A page on the home network is plain `http`, not a
+   secure context, so it may not use the camera directly (`getUserMedia`).
+   It asks for a video instead (`<input type="file" accept="video/*"
+   capture="user">`), which the phone films with its own camera app, or
+   picks from its gallery.
+4. **Tracking on the phone.** MediaPipe for the web (Google's
+   `@mediapipe/tasks-vision` 1.2.3, Apache-2.0) with its Face Landmarker
+   (with blendshapes) and Pose Landmarker (lite) runs in the phone's
+   browser, on its graphics if it can (WebGL 2), else on its processor.
+   The device serves the files (`/r/assets/...`, 24 MB, kept by the
+   browser after the first time); only the recorder's page may run
+   WebAssembly (its Content-Security-Policy adds `'wasm-unsafe-eval'`).
+   The page seeks through the chosen part of the video (at most
+   20 seconds) 12 times a second and keeps, for each frame, the six face
+   points, the 22 blendshapes and the nine body points (with how sure the
+   model is that each is in view) that `mocap.py` reads, in the order the
+   device gives it (`layout` in `/r/<code>/info`). A frame is about
+   0.5 KB; a 4-second gesture was 26 KB.
+5. **The clip.** The device checks every number (`frames_from_payload`),
+   turns the frames into controls and a clip exactly as Character Studio
+   does (`mocap.frame_controls`, `clip_from_frames`), thins any track past
+   the stage's 200 keys, and plays it at once as the editor's *try*
+   (`_try`). A person must be found in at least half the frames.
+6. **On the phone**: what the clip does in words (its main movements
+   only), *Play it again*, *Swap left and right* (`mocap.mirror_tracks`,
+   for a phone that saved its front camera's video mirrored), and *Film
+   again*. *Keep it* saves it as a gesture with its words or as an idle
+   action, through the same store as the editor
+   (`config/custom-motions.json`); an existing name, built in or added,
+   is replaced only when the phone confirms. The settings page follows
+   along (`recording` events) and shows the kept gesture in the editor.
+7. **The files.** The installer fetches the tracking into
+   `models/mocap` (`python3 -m companion.mocap_assets FOLDER`): the npm
+   package and the two models at fixed versions, each file checked
+   against its SHA-256, all or nothing. Updates carry no models, so a
+   device that got this feature through an update fetches them in the
+   background when the owner first asks for a link; the phone waits,
+   saying so.
+
+The video stays on the phone. The device receives only the points, so a
+phone recording costs it no video decoding or model running at all.
+
 ## When tags are missing or wrong
 
 - **Talking never depends on tags.** The mouth, the beats and the mood's
@@ -382,6 +447,20 @@ shows, side for side.
   played, a look down on "sorry"), and time alone (an idle glance). Plus the
   settings page in a browser against the virtual device: the live view,
   temperament, switches, and trying and saving a changed gesture.
+- Recording with a phone (`core/tests/test_phone_record.py`, 22 tests):
+  codes (alphabet, expiry, a new one ends the old, guessing stopped), every
+  malformed number a phone could send refused, the routes (owner-only
+  link, no login on the phone, the header, the recorder alone allowed
+  WebAssembly, only the five tracking files served, 413 past 4 MB),
+  mirroring, replacing only when confirmed, and fetching the tracking all
+  or nothing. End to end in headless Chromium (`core/tests/phone_record_test.cjs`,
+  with any short video of a person): the settings page on a computer and a
+  phone (Pixel 7) on the device's network address, so not a secure context; the real MediaPipe files, fetched by the installer's own
+  fetcher (every SHA-256 matched); a 4-second test video read in 24 s on
+  software graphics, sent (26 KB), played, mirrored, kept, kept again under
+  the same name after confirming, the code typed in small letters, a
+  stopped link refused; the QR code decoded back to the link at the size
+  the page shows it.
 
 ## What it cannot do
 
@@ -401,7 +480,10 @@ shows, side for side.
 - No startle at a sudden noise: the microphone is only read while
   listening.
 - Recording from video was tried on a video made from a photo, not yet on a
-  real recording of someone talking.
+  real recording of someone talking. Recording with a phone was checked in
+  an emulated phone (Chromium as a Pixel 7, software graphics), not yet on
+  real iPhones and Android phones; their camera apps, video formats and
+  graphics drivers vary.
 
 ## How it was built
 

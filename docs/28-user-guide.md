@@ -277,6 +277,41 @@ movement, try it on the screen, and save it as a new gesture with the words
 that bring it on. Character Studio can also make a gesture from a video of
 you doing it (`14-making-characters.md`).
 
+### Teaching it a gesture with your phone
+
+You can film yourself making a gesture (a wave, a shrug, a little dance)
+and the character learns to make it. Your phone needs to be on the same
+Wi-Fi as the device; nothing needs installing.
+
+1. On the settings page, open the **Animation** tab and press **Show a QR
+   code for my phone**.
+2. Scan the code with your phone's camera. If it will not scan, open the
+   link shown on your phone, or go to the short address shown (such as
+   `http://192.168.1.23/r`) and type the six-letter code.
+3. Press **Film it now** (or **Choose a video** for one you already have).
+   Prop the phone up so your head and shoulders are in view (and your arms,
+   for a gesture with them), face it in good light, hold still for a
+   moment, make the gesture, then hold still again. Up to 20 seconds.
+4. Choose the part of the video to use, then **Find my movement**. Your
+   phone finds your face and body in the video; it takes a few seconds to
+   half a minute.
+5. The character makes the gesture on its screen straight away. **Play it
+   again**, **Swap left and right**, or **Film again** until you like it.
+6. Give it a name and choose what it is: a **gesture** the character makes
+   when it fits what it says (say what it means, such as "do a little
+   dance", so it knows when), or an **idle action** it does now and then by
+   itself. Press **Keep it**. Giving it the name of an existing gesture
+   (even a built-in one, such as "wave") asks before replacing it.
+
+The video never leaves your phone: only the movement found in it (where
+your face and body are, frame by frame) goes to the device. The link needs no password, so it
+works for 30 minutes and one recording session only; **Stop** on the
+settings page ends it sooner, and a new link ends the old one. Recorded
+gestures are kept with the other gestures, for every character, and can be
+changed or removed under **Change or add a gesture**. A character without
+the body part a gesture uses most (arms, say) cannot make it; the phone
+tells you when that is so.
+
 ## Memory
 
 The character remembers each conversation as a whole, the lasting things

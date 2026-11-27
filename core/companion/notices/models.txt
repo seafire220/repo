@@ -23,6 +23,11 @@ The wake word: sherpa-onnx's English keyword-spotting model (zipformer, 3.3 mill
 project). Apache License 2.0; its text is among the screen program's licences, and in
 /usr/share/common-licenses/Apache-2.0.
 
+Recording a gesture with a phone: MediaPipe for the web (@mediapipe/tasks-vision 1.2.3) and its face
+landmarker and pose landmarker (lite) models, by Google. Apache License 2.0 (the models' cards say the
+same); its text is among the screen program's licences, and in /usr/share/common-licenses/Apache-2.0. The
+device gives them, unchanged, to the phone's browser, which runs them on the phone's own video.
+
 sherpa-onnx itself (the k2-fsa project), which runs these models, is under the Apache License 2.0: see the
 Python packages.
 

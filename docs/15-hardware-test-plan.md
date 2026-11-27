@@ -59,6 +59,7 @@ they change a decision.
 | 31 | Family-safe mode | Turn it on; ask for a rude joke, and something frightening | Polite refusals that change the subject; turning it off asks for the password |
 | 32 | A Live2D model's own idle motions | Add a model that has idle motions (most bought ones do); watch it five minutes, then talk to it; switch *Its own idle motions* between as made, gentler and off | Its artist's motions play and change smoothly; looking at you, nods and gestures still show on top; the frame rate in the heartbeat stays as with them off |
 | 33 | 3D head turns | With a VRM avatar, ask it to look back over its shoulder; leave it alone ten minutes | The head reaches a profile with the shoulders following, and comes back smoothly; now and then it looks over its shoulder by itself |
+| 34 | A gesture recorded with a phone | Animation tab → *Show a QR code for my phone*; scan it with an iPhone (Safari) and an Android phone (Chrome); film a wave and a head tilt with *Film it now*, and choose an older video with *Choose a video*; then open the short address and type the code instead | The QR opens the recorder on both; the camera app opens; reading takes under 30 s for 10 s of video (note the time and the phone); the character makes the gesture, the same side as you (try *Swap left and right* if not, and note which phone needed it); it is kept and asked for by its words in conversation |
 
 ## Things to measure and feed back
 

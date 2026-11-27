@@ -41,8 +41,16 @@ const check = (name, ok) => { checks.push([name, ok]); console.log((ok ? "PASS "
   check("the key itself never comes back to the page", !html.includes("sk-very-secret"));
   await page.screenshot({ path: shots + "/console-services.png", fullPage: true });
   await page.click("#tabs button[data-tab=memory]");
-  await page.waitForFunction(() => document.querySelector("#mem-history").textContent.includes("hello there"));
+  await page.waitForFunction(() => document.querySelector("#mem-now").textContent.includes("A conversation is going on"));
   check("the conversation shows in memory", true);
+  await page.click("#tabs button[data-tab=animation]");
+  await page.click("#btn-rec-start");
+  await page.waitForSelector("#rec-box:not([hidden])");
+  check("the Animation tab gives a phone a link with a one-time code",
+    /\/r\/[A-Z2-9]{6}$/.test(await page.textContent("#rec-link")) && await page.$eval("#rec-qr", (i) => !i.hidden));
+  await page.click("#btn-rec-end");
+  await page.waitForSelector("#rec-box", { state: "hidden" });
+  check("and stops it when asked", true);
   await page.click("#tabs button[data-tab=device]");
   await page.click("#btn-logout");
   await page.waitForSelector("#login:not([hidden])");

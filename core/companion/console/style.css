@@ -10,6 +10,8 @@ nav button.on { background: var(--accent); color: #fff; border-color: var(--acce
 main { max-width: 760px; margin: 0 auto; padding: 16px; }
 button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button.danger { background: var(--bad); border-color: var(--bad); }
+button.secondary { background: var(--card); color: var(--accent); }
+button:disabled { opacity: 0.6; cursor: default; }
 button.small { padding: 2px 8px; font-size: 0.85rem; }
 a.button { display: inline-block; font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; text-decoration: none; }
 .muted { color: var(--muted); font-size: 0.95rem; }
@@ -67,3 +69,8 @@ table.tracks { border-collapse: collapse; width: 100%; max-width: 760px; }
 table.tracks td, table.tracks th { padding: 0.2em 0.4em; text-align: left; }
 table.tracks td:nth-child(2) input { width: 100%; box-sizing: border-box; }
 .notice { background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: 6px 10px; }
+.rec { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.rec img { background: #fff; border-radius: 8px; image-rendering: pixelated; flex: 0 0 auto; }
+.rec > div { flex: 1 1 260px; min-width: 0; }
+.rec a { word-break: break-all; }
+.code { font-family: ui-monospace, monospace; letter-spacing: 0.12em; }

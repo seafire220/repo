@@ -8,6 +8,7 @@ Rules:
   which a web page on another site cannot add, so it cannot act for you.
 """
 import asyncio
+import base64
 import io
 import ipaddress
 import json
@@ -20,6 +21,7 @@ import urllib.parse
 from aiohttp import web
 
 from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
+from . import mocap_assets, phone_record
 from . import memory as memory_module
 from .memory import when
 from . import backup as backup_module
@@ -34,6 +36,9 @@ SESSION_HOURS = 12
 MAX_UPLOAD = package.MAX_TOTAL + 1024 * 1024
 STATIC = os.path.join(os.path.dirname(__file__), "console")
 OPEN_PATHS = {"/api/login", "/api/setup", "/api/hello", "/api/health"}
+# The page a phone records a gesture with (phone_record.py) may run MediaPipe's WebAssembly; nothing else may.
+RECORD_CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; "
+              "media-src 'self' blob:; style-src 'self' 'unsafe-inline'")
 
 
 def local_address(remote):
@@ -49,6 +54,9 @@ class Console:
         self.device = device
         self.sessions = {}
         self.failures = {}
+        self.recorder = phone_record.Recorder()
+        self.mocap_fetch = None             # fetching the phone's tracking, when the device does not have it
+        self.mocap_error = ""
 
     # ----- middleware
     @web.middleware
@@ -57,10 +65,11 @@ class Console:
             raise web.HTTPForbidden(text="this device only answers on its home network")
         path = request.path
         self.device.last_use = time.time()
-        if path.startswith("/api/"):
+        if path.startswith(("/api/", "/r/")):
+            # (A phone recording a gesture needs no login: its link's one-time code stands for one.)
             if request.method not in ("GET", "HEAD") and request.headers.get("X-Companion") != "1":
                 raise web.HTTPForbidden(text="missing X-Companion header")
-            if path not in OPEN_PATHS and not self._session_ok(request):
+            if path.startswith("/api/") and path not in OPEN_PATHS and not self._session_ok(request):
                 raise web.HTTPUnauthorized(text="please log in")
         response = await handler(request)
         response.headers.setdefault("Cache-Control", "no-store")
@@ -518,11 +527,23 @@ class Console:
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self._check_instead(entry)
+        self._keep_motion(name, entry)
+        return web.json_response({"ok": True, "saved": entry})
+
+    def _keep_motion(self, name, entry):
+        """Keep a gesture on the device (checked already), and give it to the stage."""
         self.device.custom_motions.set(name, entry)
         speech_text.set_custom_gestures(self.device.custom_motions.words())
         if hasattr(self.device.stage, "define"):
             self.device.stage.define(name, entry)
-        return web.json_response({"ok": True, "saved": entry})
+
+    def _try_on_screen(self, entry):
+        """Play a clip on the screen without keeping it; False when the screen is not running."""
+        link = self.device.stage
+        if not hasattr(link, "define") or not link.define(motions.TRY, entry):
+            return False
+        link.send({"gesture": motions.TRY})
+        return True
 
     async def delete_motion(self, request):
         """Put a changed gesture back as built, or take an added one away."""
@@ -543,10 +564,8 @@ class Console:
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self._check_instead(entry)
-        link = self.device.stage
-        if not hasattr(link, "define") or not link.define(motions.TRY, entry):
+        if not self._try_on_screen(entry):
             raise web.HTTPServiceUnavailable(text="the character's screen is not running")
-        link.send({"gesture": motions.TRY})
         return web.json_response({"ok": True})
 
     async def put_temperament(self, request):
@@ -1063,11 +1082,232 @@ class Console:
             raise web.HTTPNotFound(text="no such notice")
         make = getattr(notices, notices.DOCUMENTS[name][1])
         if name == "models":
-            folders = [(n, self.device.model_dir(n)) for n in ("stt", "tts", "meaning", "wake")]
+            folders = [(n, self.device.model_dir(n)) for n in ("stt", "tts", "meaning", "wake", "mocap")]
             text = await asyncio.get_running_loop().run_in_executor(None, make, folders)
         else:
             text = await asyncio.get_running_loop().run_in_executor(None, make)
         return web.Response(text=text, content_type="text/plain", charset="utf-8")
+
+    # ----- gestures recorded with a phone's camera (phone_record.py)
+    def _mocap_state(self):
+        """Whether the device has the tracking a phone needs: ready, fetching, failed or missing."""
+        if not mocap_assets.missing(self.device.model_dir("mocap")):
+            return "ready"
+        if self.mocap_fetch is not None and not self.mocap_fetch.done():
+            return "fetching"
+        return "failed" if self.mocap_error else "missing"
+
+    def _fetch_mocap(self):
+        """Fetch the tracking in the background, if the device does not have it (one that got phone recording
+        through an update: updates do not carry models)."""
+        if self._mocap_state() in ("ready", "fetching"):
+            return
+        self.mocap_error = ""
+        folder = os.path.join(self.device.data_dir, "models", "mocap")
+        self.mocap_fetch = asyncio.get_running_loop().run_in_executor(None, mocap_assets.fetch, folder)
+
+        def done(future):
+            error = None if future.cancelled() else future.exception()
+            if future.cancelled() or error is not None:
+                self.mocap_error = ("the device could not download what a phone needs to record (%d MB): check its "
+                                    "internet connection, then try again" % mocap_assets.SIZE_MB)
+            self._record_changed()
+        self.mocap_fetch.add_done_callback(done)
+
+    def _record_status(self, session):
+        """A recording as the settings page shows it (no code: the page that asked for it has that)."""
+        if not session:
+            return {"active": False}
+        assets = self._mocap_state()
+        return {"active": True, "state": session["state"], "moves": session.get("moves") or [],
+                "seconds": session.get("seconds"), "saved": list(session.get("saved") or []),
+                "expires_in": max(0, int(session["expires"] - time.time())), "assets": assets,
+                "assets_message": self.mocap_error if assets == "failed" else ""}
+
+    def _record_changed(self):
+        self.device.publish("recording", self._record_status(self.recorder.current()))
+
+    async def _phone_links(self, request):
+        """The addresses a phone on the home network can open the device at: its Wi-Fi address first (the
+        settings page may be open over USB, which a phone cannot reach), then the one this page used."""
+        host = request.host or ""
+        match = re.fullmatch(r"(\[[^\]]*\]|[^:]*)(?::(\d+))?", host)
+        name, port = (match.group(1), match.group(2)) if match else (host, None)
+        suffix = ":%s" % port if port and port != "80" else ""
+        names = []
+        wifi = getattr(self.device, "wifi", None)
+        if wifi is not None:
+            try:
+                address = await wifi.address()
+            except Exception:  # noqa: BLE001 (no address is no link, not a failure)
+                address = ""
+            if address:
+                names.append(address)
+        if name and name not in names:
+            names.append(name)
+        if wifi is not None and "companion.local" not in names:
+            names.append("companion.local")
+        local = [n for n in names if n == "localhost" or n.startswith(("127.", "[::1]"))]
+        return ["http://%s%s" % (n, suffix) for n in [n for n in names if n not in local] + local]
+
+    def _phone_session(self, request):
+        try:
+            return self.recorder.find(request.match_info.get("code"))
+        except phone_record.LinkError as error:
+            if error.locked:
+                raise web.HTTPTooManyRequests(text=str(error))
+            raise web.HTTPNotFound(text=str(error))
+
+    async def _phone_json(self, request):
+        if request.content_length is None or request.content_length > phone_record.MAX_BODY:
+            raise web.HTTPRequestEntityTooLarge(max_size=phone_record.MAX_BODY,
+                                                actual_size=request.content_length or 0)
+        try:
+            body = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest(text="send JSON")
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send an object")
+        return body
+
+    def _can_make(self, entry):
+        """Whether the character on the screen has the controls the clip needs (True when not known)."""
+        have = {c.get("control") for c in getattr(self.device.stage, "controls", None) or [] if isinstance(c, dict)}
+        if not have:
+            return True
+        return all(any(part in have for part in need.split("|")) for need in entry.get("needs") or [])
+
+    async def _motion_origin(self, name):
+        """Whether a gesture of that name exists: "added" on this device, "built in", or None."""
+        if name in self.device.custom_motions.all():
+            return "added"
+        link = self.device.stage
+        library = getattr(link, "library", None)
+        if not library and hasattr(link, "describe_library"):
+            library = await link.describe_library()
+        if name in ((library or {}).get("clips") or {}) or name in (getattr(link, "gestures", None) or []) \
+                or name in (getattr(link, "actions", None) or []):
+            return "built in"
+        return None
+
+    # The owner's side, on the settings page.
+    async def start_recording(self, request):
+        """A new link for a phone (any earlier one stops working), with its QR code."""
+        session = self.recorder.start()
+        links = await self._phone_links(request)
+        session["links"] = [base + "/r/" + session["code"] for base in links]
+        session["short"] = links[0] + "/r"
+        picture = screen.qr_code(session["links"][0])
+        if picture is not None:
+            out = io.BytesIO()
+            picture.save(out, "PNG")
+            session["qr"] = "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
+        self._fetch_mocap()
+        self._record_changed()
+        return web.json_response(self._recording(session))
+
+    def _recording(self, session):
+        out = self._record_status(session)
+        if session:
+            out.update(code=session["code"], links=session["links"], short=session["short"], qr=session.get("qr"))
+        return out
+
+    async def get_recording(self, request):
+        return web.json_response(self._recording(self.recorder.current()))
+
+    async def end_recording(self, request):
+        self.recorder.end()
+        self._record_changed()
+        return web.json_response({"ok": True})
+
+    # The phone's side: no login, the code in the link.
+    async def record_page(self, request):
+        response = web.FileResponse(os.path.join(STATIC, "record.html"))
+        response.headers["Content-Security-Policy"] = RECORD_CSP
+        return response
+
+    async def record_info(self, request):
+        session = self._phone_session(request)
+        if session["state"] == "waiting":
+            session["state"] = "opened"
+            self._record_changed()
+        if self._mocap_state() == "missing":
+            self._fetch_mocap()
+        status = self._record_status(session)
+        cid = self.device.active_id()
+        try:
+            character = self.device.characters.manifest(cid).get("name", "") if cid else ""
+        except (OSError, ValueError):
+            character = ""
+        return web.json_response({"assets": status["assets"], "assets_message": status["assets_message"],
+                                  "expires_in": status["expires_in"], "max_seconds": phone_record.MAX_SECONDS,
+                                  "character": character, "layout": phone_record.LAYOUT})
+
+    async def record_asset(self, request):
+        name = request.match_info["name"]
+        if name not in mocap_assets.FILES:
+            raise web.HTTPNotFound(text="no such file")
+        path = os.path.join(self.device.model_dir("mocap"), name)
+        if not os.path.isfile(path):
+            raise web.HTTPServiceUnavailable(text="the device is still fetching what a phone needs to record")
+        response = web.FileResponse(path)
+        response.content_type = mocap_assets.CONTENT_TYPES[os.path.splitext(name)[1]]
+        # The files never change for a name (each is checked against its SHA-256): the phone may keep them,
+        # asking again only whether they changed.
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    async def record_motion(self, request):
+        """The landmarks of a filmed gesture: made into a clip, played on the screen at once."""
+        session = self._phone_session(request)
+        body = await self._phone_json(request)
+        try:
+            tracks, moves = await asyncio.get_running_loop().run_in_executor(None, phone_record.make_clip, body)
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        seconds = max(keys[-1][0] for keys in tracks.values())
+        session.update(tracks=tracks, moves=moves, seconds=seconds, state="ready")
+        entry = phone_record.entry(tracks, bool(body.get("mirror")))
+        played = self._try_on_screen(motions.clean(motions.TRY, entry))
+        self._record_changed()
+        return web.json_response({"ok": True, "moves": moves, "seconds": seconds, "played": played,
+                                  "can": self._can_make(entry)})
+
+    async def record_play(self, request):
+        """Play the gesture again (swapped left for right, if asked)."""
+        session = self._phone_session(request)
+        body = await self._phone_json(request)
+        if not session.get("tracks"):
+            raise web.HTTPConflict(text="send a gesture first")
+        entry = phone_record.entry(session["tracks"], bool(body.get("mirror")))
+        if not self._try_on_screen(motions.clean(motions.TRY, entry)):
+            raise web.HTTPServiceUnavailable(text="the character's screen is not running")
+        return web.json_response({"ok": True, "can": self._can_make(entry)})
+
+    async def record_save(self, request):
+        """Keep the gesture with the others, under the name the phone gave it."""
+        session = self._phone_session(request)
+        body = await self._phone_json(request)
+        if not session.get("tracks"):
+            raise web.HTTPConflict(text="send a gesture first")
+        name = phone_record.gesture_name(body.get("name"))
+        kind = body.get("kind") or "gesture"
+        if kind not in ("gesture", "idle"):
+            raise web.HTTPBadRequest(text="keep it as a gesture or as an idle action")
+        words = " ".join(str(body.get("words") or "").replace("[", " ").replace("]", " ").split())[:80]
+        origin = await self._motion_origin(name)
+        if origin and not body.get("replace"):
+            return web.json_response({"exists": origin, "name": name}, status=409)
+        try:
+            entry = motions.clean(name, phone_record.entry(session["tracks"], bool(body.get("mirror")), kind,
+                                                           words or None))
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self._keep_motion(name, entry)
+        session["state"] = "saved"
+        session["saved"] = list(session.get("saved") or []) + [name]
+        self._record_changed()
+        return web.json_response({"ok": True, "name": name, "kind": kind, "replaced": origin})
 
 
 def make_app(device):
@@ -1121,6 +1361,17 @@ def make_app(device):
     r.add_post("/api/motions/try", console.try_motion)
     r.add_put("/api/motions/{name}", console.put_motion)
     r.add_delete("/api/motions/{name}", console.delete_motion)
+    r.add_get("/api/record", console.get_recording)
+    r.add_post("/api/record", console.start_recording)
+    r.add_delete("/api/record", console.end_recording)
+    r.add_get("/r", console.record_page)
+    r.add_get("/r/", console.record_page)
+    r.add_get("/r/assets/{name}", console.record_asset)
+    r.add_get("/r/{code}", console.record_page)
+    r.add_get("/r/{code}/info", console.record_info)
+    r.add_post("/r/{code}/motion", console.record_motion)
+    r.add_post("/r/{code}/play", console.record_play)
+    r.add_post("/r/{code}/save", console.record_save)
     r.add_post("/api/stage/preview", console.stage_preview)
     r.add_post("/api/cards/read", console.read_card)
     r.add_get("/api/memory/{cid}", console.get_memory)

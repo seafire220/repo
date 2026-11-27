@@ -251,6 +251,18 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/wake" ]; then
     rm -rf "$tmp"
 fi
 
+if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/mocap" ]; then
+    say "Downloading the tracking a phone uses to record gestures"
+    # MediaPipe for the web and its face and body models (Apache-2.0), each file checked against its SHA-256
+    # (core/companion/mocap_assets.py). A device without them fetches them when a phone first asks.
+    install -d -o companion -g companion "$DATA/models"
+    if PYTHONPATH="$REPO/core" python3 -m companion.mocap_assets "$DATA/models/mocap"; then
+        chown -R companion:companion "$DATA/models"
+    else
+        echo "warning: could not download the tracking for phone recording; the device fetches it when first asked" >&2
+    fi
+fi
+
 say "Preparing the first screen"
 # The screen shows this setup card from the very first start, before the
 # core service has run; the service replaces it as soon as it starts.

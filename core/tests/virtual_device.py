@@ -1,6 +1,9 @@
 """Run the core with stand-in AI providers and no sound, for trying the console without keys or hardware.
 
-    python tests/virtual_device.py DATA_DIR PORT
+    python tests/virtual_device.py DATA_DIR PORT [HOST]
+
+HOST is 127.0.0.1 unless given: give the computer's network address to reach it from another device, or
+to see pages as a phone on a home network does (plain http, not localhost: not a secure context).
 """
 import asyncio
 import os
@@ -27,15 +30,15 @@ def providers(which, device):
     raise RuntimeError("no stand-in for " + which)
 
 
-async def main(data, port):
+async def main(data, port, host="127.0.0.1"):
     device = Device(data, speaker=Speaker(command=None), stage=FakeStage(), provider_factory=providers)
     device.start()
     runner = web.AppRunner(make_app(device))
     await runner.setup()
-    await web.TCPSite(runner, "127.0.0.1", port).start()
+    await web.TCPSite(runner, host, port).start()
     print("ready", flush=True)
     await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    asyncio.run(main(sys.argv[1], int(sys.argv[2])))
+    asyncio.run(main(sys.argv[1], int(sys.argv[2]), *sys.argv[3:4]))

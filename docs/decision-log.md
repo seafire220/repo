@@ -988,3 +988,29 @@ rejected. Settled entries are not reopened without new evidence.
     straight after cloning.
 - Keys for every service are kept like the others: write-only, redacted from logs and support reports,
   left out of backups.
+
+## D-070 — Gestures recorded with a phone: the phone films and tracks, the device makes the clip
+
+- Date: 2026-11-27. Status: built; checked in an emulated phone (Chromium as a Pixel 7), not yet on real
+  iPhones and Android phones.
+- Asked for by the owner: let owners make their own gestures with their phone as the camera, reached by a
+  QR code or, when that will not scan, a link. Inspired by Visio (a VTuber app, EUPL-1.2) without copying it:
+  nothing of Visio is used (no code, page design or assets), only the general idea of a phone as a motion
+  camera, which no licence covers. The pieces are MediaPipe (Apache-2.0), the conversion Character Studio
+  already had (moved to `core/companion/mocap.py` and shared), and pages of our own.
+- **The phone films with its own camera app** (`<input type="file" accept="video/*" capture>`), not a live
+  camera view: `getUserMedia` needs a secure context (HTTPS or localhost), and a device on a home network
+  has no certificate a phone trusts. A self-signed one would greet owners with a security warning. So there
+  is no live puppeteering from the phone for now; recording a gesture does not need it.
+- **Tracking runs on the phone**, in its browser, with the files the device serves: a phone is many times
+  faster than the device, the device never decodes video, and the video stays on the phone. Only the points
+  MediaPipe finds go to the device (about 0.5 KB a frame).
+- **The same conversion as Character Studio**, so a gesture recorded either way plays the same; the device
+  checks every number it is sent.
+- **The link needs no password**: a one-time code (six of 31 easily told-apart letters and digits, about
+  887 million codes), one at a time, for 30 minutes, made only by the logged-in owner; 30 wrong codes in a
+  minute stop all codes for a minute. Only the recorder's page may run WebAssembly.
+- **The files** (24 MB) are fetched at install at fixed versions, each checked by SHA-256; a device that gets
+  this through an update fetches them when the owner first asks for a link, since updates carry no models.
+- Later, if wanted: live puppeteering from a phone (needs HTTPS the phone trusts, or an app); recording on
+  real phones of several makes, to check their camera apps' video formats and graphics drivers.

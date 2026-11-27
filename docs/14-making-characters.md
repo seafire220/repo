@@ -245,7 +245,13 @@ used, so a character at rest looks exactly like its picture.
 ## Gestures of your own, from a video
 
 Every character gets the device's gestures and idle actions. To add one
-of your own, or to make one look more like a real person, film it:
+of your own, or to make one look more like a real person, film it.
+
+The easiest way needs no computer: the device's settings page shows a QR
+code that opens a recorder on your phone, which films the gesture, finds
+your movement and hands it to the device (*Teaching it a gesture with your
+phone* in `28-user-guide.md`). The steps below do the same from a video on
+a computer, with Character Studio:
 
 1. Film yourself (or someone who agreed to it) facing the camera, in good
    light, head and shoulders or the upper body in view, doing the gesture

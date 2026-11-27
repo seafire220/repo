@@ -131,6 +131,7 @@ function onEvent(e) {
     if (e.gesture) addAnimationLog(e.gesture);
     return;
   }
+  if (e.kind === "recording") { showRecording(e); return; }
   if (e.kind === "state") text($("home-state"), e.state);
   else if (e.kind === "heard") addLog("You:", e.text);
   else if (e.kind === "replied" && e.text) addLog("Character:", e.text + (e.interrupted ? " (interrupted)" : ""));
@@ -406,7 +407,57 @@ $("btn-ed-reset").addEventListener("click", async () => {
   } catch (err) { text($("ed-msg"), err.message); }
 });
 
+// ----- recording a gesture with a phone: a QR code and a link with a one-time code
+let recording = null;
+
+async function loadRecording() {
+  showRecording(await api("GET", "/api/record"));
+}
+
+function showRecording(r) {
+  // A recording started elsewhere (another page) is news without its link: ask for the whole of it.
+  if (r.active && !r.links && !(recording && recording.links)) { loadRecording().catch(() => {}); return; }
+  const before = recording && recording.saved ? recording.saved.length : 0;
+  recording = r.active ? Object.assign(recording || {}, r) : null;
+  $("rec-box").hidden = !recording;
+  text($("btn-rec-start"), recording ? "Show a new QR code" : "Show a QR code for my phone");
+  $("btn-rec-start").hidden = !!recording;
+  if (!recording) return;
+  $("rec-qr").hidden = !recording.qr;
+  if (recording.qr) $("rec-qr").src = recording.qr;
+  $("rec-link").href = recording.links[0];
+  text($("rec-link"), recording.links[0]);
+  text($("rec-short"), recording.short);
+  text($("rec-code"), recording.code);
+  const said = {
+    waiting: "Waiting for your phone to open the link…",
+    opened: "Your phone has the recorder open.",
+    ready: "A gesture came from your phone and is playing on the screen" +
+      (recording.moves && recording.moves.length ? ": it " + recording.moves.join(", ") : "") + ".",
+    saved: "Kept: " + (recording.saved || []).map((n) => n.replace(/_/g, " ")).join(", ") + ". Record another on your phone, or stop.",
+  }[recording.state] || "";
+  const assets = recording.assets === "fetching" ? " The device is downloading what your phone needs to read movement (once only)." :
+    recording.assets === "failed" ? " " + recording.assets_message : "";
+  const minutes = Math.round((recording.expires_in || 0) / 60);
+  text($("rec-status"), said + assets + (minutes ? " The link works for another " + minutes + " minute" + (minutes === 1 ? "" : "s") + "." : ""));
+  if ((recording.saved || []).length > before) loadEditor().catch((e) => text($("ed-msg"), e.message));
+}
+
+async function startRecording() {
+  text($("rec-msg"), "");
+  try {
+    recording = null;
+    showRecording(await api("POST", "/api/record", {}));
+  } catch (err) { text($("rec-msg"), err.message); }
+}
+$("btn-rec-start").addEventListener("click", startRecording);
+$("btn-rec-new").addEventListener("click", startRecording);
+$("btn-rec-end").addEventListener("click", async () => {
+  try { await api("DELETE", "/api/record"); showRecording({ active: false }); } catch (err) { text($("rec-msg"), err.message); }
+});
+
 async function loadAnimation() {
+  loadRecording().catch((e) => text($("rec-msg"), e.message));
   loadEditor().catch((e) => text($("ed-msg"), e.message));
   const a = await api("GET", "/api/animation");
   $("an-log").replaceChildren();

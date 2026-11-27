@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Record a gesture</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  main { max-width: 560px; }
+  h1 { margin: 0; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 2px 16px 14px; margin: 14px 0; }
+  .step h2 { font-size: 1.1rem; margin: 12px 0 6px; }
+  .big { display: block; width: 100%; padding: 12px; font-size: 1.05rem; margin: 10px 0; text-align: center; }
+  label.button { display: block; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; margin: 10px 0; }
+  .secondary, label.button.secondary { background: var(--card); color: var(--accent); }
+  video, canvas { width: 100%; max-height: 55vh; border-radius: 10px; background: #000; display: block; object-fit: contain; }
+  progress { width: 100%; height: 14px; }
+  .code { font: 600 1.8rem/1.2 ui-monospace, monospace; letter-spacing: 0.15em; text-transform: uppercase; width: 9ch; text-align: center; }
+  .tips { padding-left: 1.2em; } .tips li { margin: 4px 0; }
+  .range { display: flex; align-items: center; gap: 8px; margin: 6px 0; } .range input { flex: 1; } .range b { min-width: 4.5ch; text-align: right; }
+  .choice label { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; } .choice input { margin-top: 4px; }
+  input[type=text] { width: 100%; }
+  .ok { color: #2e7d32; } @media (prefers-color-scheme: dark) { .ok { color: #81c784; } }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; } .buttons button { flex: 1 1 auto; }
+</style>
+<script type="module" src="/static/record.js"></script>
+</head>
+<body>
+<header><h1>Record a gesture <span id="for" class="muted"></span></h1></header>
+<main>
+  <section id="ask-code" class="step" hidden>
+    <h2>Type the code</h2>
+    <p>The code is on the device's settings page, on the Animation tab, under <i>Record a gesture with your
+      phone</i>.</p>
+    <form id="code-form" class="row">
+      <input id="code" class="code" maxlength="8" autocomplete="off" autocapitalize="characters" spellcheck="false"
+             aria-label="Code" required>
+      <button type="submit">Open</button>
+    </form>
+  </section>
+
+  <p id="problem" class="notice" hidden></p>
+  <p id="getting-ready" class="muted" hidden></p>
+
+  <section id="film" class="step" hidden>
+    <h2>1. Film the gesture</h2>
+    <ul class="tips">
+      <li>Prop the phone up, or ask someone to hold it, so your head and shoulders are in view (and your arms, for
+        a gesture with them).</li>
+      <li>Face the camera, in good light, with nothing bright behind you.</li>
+      <li>Hold still for a moment, make the gesture, then hold still again. Up to <span class="max-seconds">20</span>
+        seconds.</li>
+      <li>The character moves the way you do, side for side, as if it were you.</li>
+    </ul>
+    <label class="button big">Film it now<input type="file" id="camera" accept="video/*" capture="user" hidden></label>
+    <label class="button big secondary">Choose a video<input type="file" id="pick" accept="video/*" hidden></label>
+  </section>
+
+  <section id="trim" class="step" hidden>
+    <h2>2. The part to use</h2>
+    <video id="video" muted playsinline preload="auto"></video>
+    <div class="range"><span>Start</span><input type="range" id="start" min="0" step="0.05" value="0"><b id="start-at">0.0 s</b></div>
+    <div class="range"><span>End</span><input type="range" id="end" min="0" step="0.05" value="0"><b id="end-at">0.0 s</b></div>
+    <p id="trim-note" class="muted"></p>
+    <button id="btn-read" class="big">Find my movement</button>
+    <button id="btn-trim-back" class="big secondary">Film again</button>
+  </section>
+
+  <section id="read" class="step" hidden>
+    <h2>3. Finding your movement</h2>
+    <canvas id="seen" width="480" height="360"></canvas>
+    <p><progress id="progress" max="1" value="0"></progress></p>
+    <p id="read-note" class="muted">This takes a little while; keep this page open.</p>
+    <button id="btn-stop" class="big secondary">Stop</button>
+  </section>
+
+  <section id="result" class="step" hidden>
+    <h2>4. On the device's screen</h2>
+    <p id="result-text"></p>
+    <p id="result-note" class="muted"></p>
+    <label><input type="checkbox" id="mirror"> Swap left and right</label>
+    <div class="buttons">
+      <button id="btn-again" class="secondary">Play it again</button>
+      <button id="btn-refilm" class="secondary">Film again</button>
+    </div>
+
+    <h2>5. Keep it</h2>
+    <form id="keep-form">
+      <label>Call it <input type="text" id="name" maxlength="40" placeholder="little dance" required></label>
+      <div class="choice">
+        <label><input type="radio" name="kind" value="gesture" checked>
+          <span>A gesture: the character makes it when it fits what it is saying.</span></label>
+        <label><input type="radio" name="kind" value="idle">
+          <span>An idle action: it does it now and then by itself, when nobody is talking.</span></label>
+      </div>
+      <label id="words-row">What it means, so the character knows when to make it
+        <input type="text" id="words" maxlength="80" placeholder="do a little dance"></label>
+      <div id="replace" hidden>
+        <p id="replace-text"></p>
+        <div class="buttons"><button type="button" id="btn-replace">Replace it</button>
+          <button type="button" id="btn-rename" class="secondary">Choose another name</button></div>
+      </div>
+      <button type="submit" id="btn-keep" class="big">Keep it</button>
+      <p id="keep-msg" class="error"></p>
+    </form>
+  </section>
+
+  <section id="kept" class="step" hidden>
+    <h2>Kept</h2>
+    <p id="kept-text" class="ok"></p>
+    <p class="muted">You can change or remove it on the device's settings page, on the Animation tab.</p>
+    <button id="btn-another" class="big">Record another</button>
+  </section>
+
+  <p id="expiry" class="muted"></p>
+  <p class="muted">Your video stays on this phone: only the movement found in it goes to the device.
+    The movement is found with MediaPipe (Google, Apache License 2.0):
+    <a href="/licences" target="_blank" rel="noopener">licences and notices</a>.</p>
+</main>
+</body>
+</html>
