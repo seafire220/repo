@@ -150,6 +150,36 @@ class RefineTest(unittest.TestCase):
         self.assertAlmostEqual(mean_dx(1), -mean_dx(-1), places=2)
         self.assertEqual(self.offsets("ParamAngleX", "face_base", 0)[0], [0.0, 0.0])
 
+    def test_a_face_with_big_hair_turns_instead_of_sliding(self):
+        # Hair three times as wide as the face (as many drawn characters have): the head's rounded surface
+        # is the face's, not the hair's, so the eyes go round it while the cheeks hold.
+        p = puppet()
+        head = next(n for n in p["nodes"]["children"][0]["children"] if n["name"] == "head")
+        head["children"][-2] = part("80_hair_front", -150, -150, 150, -60)
+        refine.refine(p)
+
+        def span(role, position, near_y=None):
+            b = binding(p, "ParamAngleX", role)
+            xs = [x + m[0] for (x, y), m in zip(mesh_points(p, role), b["values"][{-1: 0, 0: 1, 1: 2}[position]][0])
+                  if near_y is None or abs(y - near_y) < 6]
+            return min(xs), max(xs)
+        eye_y = sum(y for _, y in mesh_points(p, "eye_r")) / len(mesh_points(p, "eye_r"))
+        for turn, far, near in ((1, "eye_r", "eye_l"), (-1, "eye_l", "eye_r")):
+            cheeks0, cheeks = span("face_base", 0, eye_y), span("face_base", turn, eye_y)
+            cheek_move = abs((cheeks[0] + cheeks[1]) - (cheeks0[0] + cheeks0[1])) / 2
+            eye0, eye = span(far, 0), span(far, turn)
+            eye_move = abs((eye[0] + eye[1]) - (eye0[0] + eye0[1])) / 2
+            self.assertGreater(eye_move, 2 * cheek_move, "the eyes go round the head; the cheeks hold")
+            side = 1 if turn == 1 else 0
+            gap0 = abs(cheeks0[side] - eye0[side])
+            gap = abs(cheeks[side] - eye[side])
+            self.assertLess(gap, gap0 - 1, "the far eye nears its cheek, as on a rounded head")
+            self.assertTrue(cheeks[0] - 0.5 <= eye[0] and eye[1] <= cheeks[1] + 0.5, "and stays on the face")
+            self.assertGreater(span(near, turn)[1] - span(near, turn)[0], span(near, 0)[1] - span(near, 0)[0])
+        right = span("eye_r", 1)
+        left = span("eye_l", -1)
+        self.assertAlmostEqual(right[1] - right[0], left[1] - left[0], places=1, msg="both ways alike")
+
     def test_a_nod_moves_the_features_up_or_down(self):
         down = self.offsets("ParamAngleY", "eye_l", -1)[0]
         up = self.offsets("ParamAngleY", "eye_l", 1)[0]

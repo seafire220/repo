@@ -14,11 +14,15 @@ This version follows how hand-made Live2D and Inochi2D puppets are built:
   * Tilt: the whole head (face, features, hair) leans as one rigid piece
     about a point in the neck. The neck bends to follow, and long hair fades
     out of the movement below the neck so it hangs instead of swinging.
-  * Turn and nod: the head is treated as a rounded surface. The middle of
-    the face slides furthest, the cheeks and chin less, and the outline of
-    the head not at all. Eyes, eyebrows, nose and mouth each move as a
-    rigid piece by the amount at their own centre, so they never change
-    shape. The face and hair bend smoothly around them.
+  * Turn and nod: the head is treated as a rounded surface the size of the
+    face, so the cheeks lie on its outline. The cheeks and the outline of
+    the hair hold (the whole head shifts only a little towards the turn),
+    while the eyes, eyebrows, nose and mouth go round the surface: the far
+    eye narrows and nears the cheek, the near one widens, the nose moves
+    most. Each feature follows a coarse grid, so it keeps its shape; the
+    face and hair bend smoothly around them. (Sized by the hair, as it once
+    was, a face with big hair slid sideways inside it, its features hardly
+    moving against its cheeks: a slide, not a turn.)
 
 Mouth
 -----
@@ -65,7 +69,7 @@ MAGIC = b"TRNSRTS\0"
 ANGLE_PARAMS = ("ParamAngleX", "ParamAngleY", "ParamAngleZ")
 
 # Turn and nod: how far the head turns at the end of the control's range.
-TURN_ANGLE = math.radians(18)
+TURN_ANGLE = math.radians(22)
 NOD_ANGLE = math.radians(12)
 # How far each kind of part stands out from the rounded head surface, in
 # head half-widths: the nose stands out and so moves furthest. Parts not
@@ -88,10 +92,10 @@ GRID_DEFAULT = (3, 3)
 FEATURE_KINDS = ("eye", "mouth", "nose", "blush", "ear")
 # Head lean at the end of the range, in radians (about 9 degrees).
 MAX_TILT = 0.16
-# The rounded surface: half-width as a share of face width (limits), and how
-# far below the chin it ends, as a multiple of the eye-to-chin distance.
-SURFACE_MIN = 0.62
-SURFACE_MAX = 0.95
+# The rounded surface: its half-width, in the face's half-widths (the cheeks lie just inside its outline,
+# so they hold and no feature can pass them), and how far below the chin it ends, as a multiple of the
+# eye-to-chin distance.
+FACE_SPAN = 1.03
 SURFACE_BELOW = 1.25
 # Where the head leans from: this share of the way down the visible neck,
 # but no further below the chin than this share of the face width.
@@ -188,8 +192,8 @@ def head_geometry(parts):
     eye_line = sum(eye_ys) / len(eye_ys) if eye_ys else top + 0.45 * (chin - top)
     eye_line = min(max(eye_line, top + 0.2 * (chin - top)), chin - 0.2 * (chin - top))
 
-    hx0, hy0, hx1, _ = box([pt for p in head_parts for pt in points(p)])
-    half_width = min(max((hx1 - hx0) / 2.0, SURFACE_MIN * width), SURFACE_MAX * width)
+    _, hy0, _, _ = box([pt for p in head_parts for pt in points(p)])
+    half_width = FACE_SPAN * width / 2.0
     up = min(max(eye_line - hy0, 0.5 * width), 1.1 * width)
     down = SURFACE_BELOW * (chin - eye_line)
 
@@ -216,7 +220,7 @@ def surface_depth(x, y, g):
     return math.sqrt(max(0.0, 1.0 - u * u - v * v))
 
 
-def turned(x, y, g, turn, nod, depth=(1.0, 0.0)):
+def turned(x, y, g, turn, nod, depth=(1.0, 0.0), held=True):
     """Turn and nod: where the point at (x, y) goes when the head turns (turn) or nods (nod), each -1..1.
 
     The head is a rounded solid. Each point is turned with it about the
@@ -225,8 +229,10 @@ def turned(x, y, g, turn, nod, depth=(1.0, 0.0)):
     and extra is for parts that stand out from the surface. So the middle of the face
     moves furthest, the side turning away gets narrower and the near side
     wider, parts in front move more than the face and parts behind move the
-    other way. Near the outline points are held, so the outline moves only a
-    little. y grows downwards; a positive nod looks up.
+    other way. Near the outline points are held (`held`: the face's and the
+    hair's, which would uncover what is behind them), so the outline moves
+    only a little; features lie on the face and go all the way round. y grows
+    downwards; a positive nod looks up.
     """
     rx = g["half_width"]
     dy = y - g["centre"][1]
@@ -234,7 +240,7 @@ def turned(x, y, g, turn, nod, depth=(1.0, 0.0)):
     u = (x - g["centre"][0]) / rx
     v = dy / ry
     s = surface_depth(x, y, g)
-    hold = smoothstep(s / OUTLINE_HOLD)
+    hold = smoothstep(s / OUTLINE_HOLD) if held else 1.0
     z = depth[0] * s + depth[1]
     a, b = TURN_ANGLE * turn, NOD_ANGLE * nod
     u2 = u * math.cos(a) + z * math.sin(a)
@@ -329,7 +335,7 @@ def offsets_for(part, g, name, position):
     members = g["groups"][group] if group is not None else [part]
     area = box([pt for m in members for pt in points(m)])
     shape = GRIDS.get(kind, GRID_DEFAULT)
-    return grid_offsets(pts, area, shape, lambda x, y: turned(x, y, g, turn, nod, depth_at(role, x, y, g)))
+    return grid_offsets(pts, area, shape, lambda x, y: turned(x, y, g, turn, nod, depth_at(role, x, y, g), held=False))
 
 
 def refine(puppet):

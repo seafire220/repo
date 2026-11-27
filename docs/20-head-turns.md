@@ -1,6 +1,6 @@
 # How heads turn
 
-Status: 2026-11-17. Head turns up to ±30 (about 45° on screen) are built
+Status: 2026-11-27 (the head sized by the face, below). Head turns up to ±30 (about 45° on screen) are built
 (`studio/refine.py`) and the owner judged them "a massive improvement".
 Turns to the side profile (90°) are planned, not built, for flat (2D) characters: they need drawn side
 artwork. **3D (VRM) avatars turn to a profile already** (2026-11-21, D-062): they have a real head to turn,
@@ -40,6 +40,36 @@ Not yet right: at the very end of the range (±100%) the near-side hair
 still stretches somewhat, and pictures whose hair edges keep a light halo
 from background removal (t3) show it more when the head turns. Up to
 ±50%, the range normal conversation uses, turns are clean.
+
+### 2026-11-27: the head sized by the face (a turn, not a slide)
+
+The owner saw Alice's eyes and features look "off" turning one way, as
+with the earlier concave look: they should take the shape a turning head
+gives them. Measured (`turned`'s output, on all eleven test characters),
+the turn was symmetric, but on every character the face slid more than it
+turned: the eyes moved only 1.0 to 1.3 times as far as the cheeks, and the
+gap between the far eye and its cheek hardly changed. The head's rounded
+surface had been sized by everything on the head, hair included, so with
+big hair it was 1.2 to 1.9 times as wide as the face; the cheeks lay in its
+middle and moved almost as much as the eyes. Lopsided drawings (hair longer
+on one side) made one direction look worse.
+
+Now the surface is the face's (1.03 times its half-width), so the cheeks
+lie on its outline and hold, and the features are not held at the outline
+(only the face's and the hair's own outlines are, which would uncover what
+is behind them): they go round the surface, so the far eye narrows and
+nears its cheek and cannot pass it, and the near eye widens. The turn's
+angle is 22 degrees (was 18) to keep the movement clear on the smaller
+surface. On the eleven characters the eyes now move 2.0 to 3.7 times as
+far as the cheeks (f1, whose face part is unusually wide, 1.1 to 1.4), the
+far eye narrows to 0.5 to 0.9 of its width and the near one widens to 1.0
+to 1.6; Alice's face no longer uncovers the made-up fill at the jaw on a
+turn, and t3's and t5's doubled outlines are gone. A test checks a face
+with hair three times its width turns rather than slides
+(`test_a_face_with_big_hair_turns_instead_of_sliding`). The jaw line on
+the near side can stretch slightly where the held cheek meets the turning
+skin. Characters keep the rig they were made with: make them again in
+Character Studio to get this.
 
 ## What the 90° tutorial adds
 

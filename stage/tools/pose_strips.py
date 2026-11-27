@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "studio"))
 import live2d_export  # noqa: E402
 
-SIZE = 360
+SIZE = int(os.environ.get("STRIP_SIZE", "360"))
 HOLD = 1.5
 REST = {"ParamAngleX": 0, "ParamAngleY": 0, "ParamAngleZ": 0, "ParamBodyAngleX": 0, "ParamBodyAngleY": 0,
         "ParamBodyAngleZ": 0, "ParamBreath": 0, "ParamEyeLOpen": 1, "ParamEyeROpen": 1, "ParamMouthOpenY": 0,
