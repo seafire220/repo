@@ -234,14 +234,28 @@ file from other AI-companion apps) fills it in for you to check and save.
 ### Its voice
 
 The device's own voice is free and works without the internet. With a voice
-service (ElevenLabs, Cartesia, Fish Audio, Inworld AI, MiniMax, OpenAI or
-an OpenAI-style server), each character can have its own voice service and
-voice ID under the character (with **List voices** to pick from your
-account). **Clone a voice** creates a custom voice from a clear audio
-recording (WAV, MP3, M4A, OGG, FLAC or WebM depending on the service) on
-ElevenLabs, Cartesia, Fish Audio, Inworld AI or MiniMax, and switches that
-character to the cloned voice straight away. If a character package includes
-its own `voice/sample.wav`, you can also clone directly from it.
+service (ElevenLabs, Cartesia, Fish Audio, Inworld AI, MiniMax, Deepgram,
+Google Cloud, OpenAI or an OpenAI-style server), each character can have its
+own voice service and voice ID under the character (with **List voices** to
+pick from your account).
+
+**Clone a voice** makes a custom voice from a clear recording of one person
+speaking, in your own account on ElevenLabs, Cartesia, Fish Audio, Inworld AI
+or MiniMax, and switches the character to it straight away. The page says
+what each service takes:
+
+| Service | Recording | Notes |
+|---|---|---|
+| ElevenLabs | WAV, MP3, M4A, OGG, FLAC or WebM; 30 seconds to a few minutes; up to 20 MB | |
+| Cartesia | WAV, MP3, OGG, FLAC or WebM; 10 to 60 seconds; up to 16 MB | Choose the language spoken in the recording |
+| Fish Audio | WAV, MP3 or FLAC; 10 to 30 seconds is best; up to 20 MB | |
+| Inworld AI | WAV or MP3; 3 to 30 seconds (it uses the first 30); up to 12 MB | Choose the language, or let it tell |
+| MiniMax | WAV, MP3 or M4A; 10 seconds to 5 minutes; up to 20 MB | The new voice says one word at once: MiniMax deletes cloned voices that have never spoken within 7 days |
+
+Deepgram and Google Cloud have voices to choose from, but no cloning. If a
+character package includes its own `voice/sample.wav`, you can clone directly
+from it. The recording goes to the service you chose, and the cloned voice
+stays in your account there; delete it there if you no longer want it.
 
 ## How it moves
 
@@ -328,9 +342,10 @@ Under **AI services**, in three parts:
 2. **Voice**: the free on-device voice, with 72 voices to choose from in
    English accents from around the world (English, Scottish, Irish, Welsh,
    American, Canadian, Australian, New Zealand, South African and Indian), or
-   a cloud voice service: ElevenLabs, Cartesia, Fish Audio, Inworld AI,
-   MiniMax (all supporting custom voice cloning), OpenAI, or any
-   OpenAI-compatible server.
+   a cloud voice service: ElevenLabs, Cartesia, Fish Audio, Inworld AI or
+   MiniMax (all of them can clone a voice), Deepgram or Google Cloud (voices
+   to choose from), OpenAI, or any OpenAI-compatible server. Each needs its
+   own key, from its web site; the box under the service says where.
 3. **Speech recognition** (hearing you): free and on the device by default,
    or a cloud service.
 

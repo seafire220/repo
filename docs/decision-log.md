@@ -962,3 +962,29 @@ rejected. Settled entries are not reopened without new evidence.
   always give the newest apps. Image releases are never "latest".
 - Updates for sold devices stay in `seafire220/update-repo`, whose latest release devices read; nothing
   else is released there.
+
+## D-069 — Voice services besides ElevenLabs, five of them with cloning
+
+- Date: 2026-11-27. Status: built; tested against stand-in servers made from each service's API reference
+  (no keys here, so not yet against the real services).
+- Asked for by the owner: popular voice services and voice cloning besides ElevenLabs. Chosen from late-2026
+  comparisons and each service's current API documents:
+  - **Cartesia** (Sonic 3.6): the low-latency favourite for voice agents; instant cloning from 10-60 s.
+  - **Fish Audio** (S2.1): good value, popular for character voices; cloning by "voice models".
+  - **MiniMax** (Speech 2.8): expressive, many languages; cloning by upload, then clone.
+  - **Inworld** (TTS-2): the cheapest of the popular ones; instant cloning from up to 30 s.
+  - **Deepgram** (Flux TTS and Aura-2) and **Google Cloud** (Chirp 3 HD and others): widely used, voices
+    only (no cloning through their API).
+  - Left out: PlayHT (shut down) and Hume's Octave (its text-to-speech closed on 13 November 2026).
+- Most of the work (the four cloning services, per-character voice services, the console) was done in a
+  separate session (commit 05fdf4e) and checked against the API documents here. Corrected:
+  - Inworld takes WAV and MP3 samples only, and its language goes in `languageCode` (the old `langCode` knows
+    15 languages). Background-noise removal is off, as Inworld warns it can spoil a clean recording. All
+    pages of its voice list are read.
+  - Fish Audio is limited to the sample formats it documents (WAV, MP3, FLAC).
+  - Cartesia's list asks for the owner's own voices separately, so clones show even when the library's
+    first page of 100 does not hold them.
+  - MiniMax deletes a cloned voice that has never spoken within 7 days, so the new voice says one word
+    straight after cloning.
+- Keys for every service are kept like the others: write-only, redacted from logs and support reports,
+  left out of backups.

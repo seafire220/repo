@@ -1,0 +1,313 @@
+{
+ "about": "Deepgram's English voices: Flux TTS (its newest, on /v2/speak) and Aura-2 (on /v1/speak), from developers.deepgram.com (docs/flux-tts/voices and docs/tts-models), 2026-11-21. The id is the model name Deepgram is asked for.",
+ "voices": [
+  {
+   "id": "flux-hannah-en",
+   "name": "Hannah (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-kit-en",
+   "name": "Kit (British man, friendly; Flux)"
+  },
+  {
+   "id": "flux-alexis-en",
+   "name": "Alexis (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-cliff-en",
+   "name": "Cliff (American man, deep; Flux)"
+  },
+  {
+   "id": "flux-sienna-en",
+   "name": "Sienna (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-cole-en",
+   "name": "Cole (American man, friendly; Flux)"
+  },
+  {
+   "id": "flux-brooke-en",
+   "name": "Brooke (American woman, friendly; Flux)"
+  },
+  {
+   "id": "flux-colin-en",
+   "name": "Colin (British man, warm; Flux)"
+  },
+  {
+   "id": "flux-gemma-en",
+   "name": "Gemma (British woman, friendly; Flux)"
+  },
+  {
+   "id": "flux-haley-en",
+   "name": "Haley (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-heather-en",
+   "name": "Heather (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-miles-en",
+   "name": "Miles (American man, clear; Flux)"
+  },
+  {
+   "id": "flux-sean-en",
+   "name": "Sean (British man, friendly; Flux)"
+  },
+  {
+   "id": "flux-bree-en",
+   "name": "Bree (American woman, friendly; Flux)"
+  },
+  {
+   "id": "flux-brittany-en",
+   "name": "Brittany (American woman, confident; Flux)"
+  },
+  {
+   "id": "flux-bruce-en",
+   "name": "Bruce (American man, friendly; Flux)"
+  },
+  {
+   "id": "flux-conor-en",
+   "name": "Conor (British man, confident; Flux)"
+  },
+  {
+   "id": "flux-donovan-en",
+   "name": "Donovan (American man, professional; Flux)"
+  },
+  {
+   "id": "flux-drew-en",
+   "name": "Drew (American man, confident; Flux)"
+  },
+  {
+   "id": "flux-elise-en",
+   "name": "Elise (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-jack-en",
+   "name": "Jack (British man, confident; Flux)"
+  },
+  {
+   "id": "flux-kai-en",
+   "name": "Kai (Singaporean man, clear; Flux)"
+  },
+  {
+   "id": "flux-kelsey-en",
+   "name": "Kelsey (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-maeve-en",
+   "name": "Maeve (Irish woman, friendly; Flux)"
+  },
+  {
+   "id": "flux-marcelo-en",
+   "name": "Marcelo (Filipino man, clear; Flux)"
+  },
+  {
+   "id": "flux-marcus-en",
+   "name": "Marcus (American man, friendly; Flux)"
+  },
+  {
+   "id": "flux-meena-en",
+   "name": "Meena (Indian woman, empathetic; Flux)"
+  },
+  {
+   "id": "flux-meghan-en",
+   "name": "Meghan (American woman, friendly; Flux)"
+  },
+  {
+   "id": "flux-naveen-en",
+   "name": "Naveen (Indian man, clear; Flux)"
+  },
+  {
+   "id": "flux-paige-en",
+   "name": "Paige (American woman, clear; Flux)"
+  },
+  {
+   "id": "flux-priya-en",
+   "name": "Priya (Indian woman, confident; Flux)"
+  },
+  {
+   "id": "flux-rufus-en",
+   "name": "Rufus (British man, friendly; Flux)"
+  },
+  {
+   "id": "flux-sharon-en",
+   "name": "Sharon (Australian woman, formal; Flux)"
+  },
+  {
+   "id": "flux-tanner-en",
+   "name": "Tanner (British man, professional; Flux)"
+  },
+  {
+   "id": "flux-wade-en",
+   "name": "Wade (American man, warm; Flux)"
+  },
+  {
+   "id": "flux-wes-en",
+   "name": "Wes (American man, thoughtful; Flux)"
+  },
+  {
+   "id": "aura-2-thalia-en",
+   "name": "Thalia (American woman, clear; Aura-2)"
+  },
+  {
+   "id": "aura-2-andromeda-en",
+   "name": "Andromeda (American woman, casual; Aura-2)"
+  },
+  {
+   "id": "aura-2-helena-en",
+   "name": "Helena (American woman, caring; Aura-2)"
+  },
+  {
+   "id": "aura-2-apollo-en",
+   "name": "Apollo (American man, confident; Aura-2)"
+  },
+  {
+   "id": "aura-2-arcas-en",
+   "name": "Arcas (American man, natural; Aura-2)"
+  },
+  {
+   "id": "aura-2-aries-en",
+   "name": "Aries (American man, warm; Aura-2)"
+  },
+  {
+   "id": "aura-2-amalthea-en",
+   "name": "Amalthea (Filipino woman, engaging; Aura-2)"
+  },
+  {
+   "id": "aura-2-asteria-en",
+   "name": "Asteria (American woman, clear; Aura-2)"
+  },
+  {
+   "id": "aura-2-athena-en",
+   "name": "Athena (American woman, calm; Aura-2)"
+  },
+  {
+   "id": "aura-2-atlas-en",
+   "name": "Atlas (American man, enthusiastic; Aura-2)"
+  },
+  {
+   "id": "aura-2-aurora-en",
+   "name": "Aurora (American woman, cheerful; Aura-2)"
+  },
+  {
+   "id": "aura-2-callista-en",
+   "name": "Callista (American woman, clear; Aura-2)"
+  },
+  {
+   "id": "aura-2-cora-en",
+   "name": "Cora (American woman, smooth; Aura-2)"
+  },
+  {
+   "id": "aura-2-cordelia-en",
+   "name": "Cordelia (American woman, approachable; Aura-2)"
+  },
+  {
+   "id": "aura-2-delia-en",
+   "name": "Delia (American woman, casual; Aura-2)"
+  },
+  {
+   "id": "aura-2-draco-en",
+   "name": "Draco (British man, warm; Aura-2)"
+  },
+  {
+   "id": "aura-2-electra-en",
+   "name": "Electra (American woman, professional; Aura-2)"
+  },
+  {
+   "id": "aura-2-harmonia-en",
+   "name": "Harmonia (American woman, empathetic; Aura-2)"
+  },
+  {
+   "id": "aura-2-hera-en",
+   "name": "Hera (American woman, smooth; Aura-2)"
+  },
+  {
+   "id": "aura-2-hermes-en",
+   "name": "Hermes (American man, expressive; Aura-2)"
+  },
+  {
+   "id": "aura-2-hyperion-en",
+   "name": "Hyperion (Australian man, caring; Aura-2)"
+  },
+  {
+   "id": "aura-2-iris-en",
+   "name": "Iris (American woman, cheerful; Aura-2)"
+  },
+  {
+   "id": "aura-2-janus-en",
+   "name": "Janus (American woman, southern; Aura-2)"
+  },
+  {
+   "id": "aura-2-juno-en",
+   "name": "Juno (American woman, natural; Aura-2)"
+  },
+  {
+   "id": "aura-2-jupiter-en",
+   "name": "Jupiter (American man, expressive; Aura-2)"
+  },
+  {
+   "id": "aura-2-luna-en",
+   "name": "Luna (American woman, friendly; Aura-2)"
+  },
+  {
+   "id": "aura-2-mars-en",
+   "name": "Mars (American man, smooth; Aura-2)"
+  },
+  {
+   "id": "aura-2-minerva-en",
+   "name": "Minerva (American woman, positive; Aura-2)"
+  },
+  {
+   "id": "aura-2-neptune-en",
+   "name": "Neptune (American man, professional; Aura-2)"
+  },
+  {
+   "id": "aura-2-odysseus-en",
+   "name": "Odysseus (American man, calm; Aura-2)"
+  },
+  {
+   "id": "aura-2-ophelia-en",
+   "name": "Ophelia (American woman, expressive; Aura-2)"
+  },
+  {
+   "id": "aura-2-orion-en",
+   "name": "Orion (American man, approachable; Aura-2)"
+  },
+  {
+   "id": "aura-2-orpheus-en",
+   "name": "Orpheus (American man, professional; Aura-2)"
+  },
+  {
+   "id": "aura-2-pandora-en",
+   "name": "Pandora (British woman, smooth; Aura-2)"
+  },
+  {
+   "id": "aura-2-phoebe-en",
+   "name": "Phoebe (American woman, energetic; Aura-2)"
+  },
+  {
+   "id": "aura-2-pluto-en",
+   "name": "Pluto (American man, smooth; Aura-2)"
+  },
+  {
+   "id": "aura-2-saturn-en",
+   "name": "Saturn (American man, knowledgeable; Aura-2)"
+  },
+  {
+   "id": "aura-2-selene-en",
+   "name": "Selene (American woman, expressive; Aura-2)"
+  },
+  {
+   "id": "aura-2-theia-en",
+   "name": "Theia (Australian woman, expressive; Aura-2)"
+  },
+  {
+   "id": "aura-2-vesta-en",
+   "name": "Vesta (American woman, natural; Aura-2)"
+  },
+  {
+   "id": "aura-2-zeus-en",
+   "name": "Zeus (American man, deep; Aura-2)"
+  }
+ ]
+}

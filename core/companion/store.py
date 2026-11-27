@@ -56,7 +56,7 @@ DEFAULT_SETTINGS = {
 # The secret names the device accepts: one key per provider.
 SECRET_NAMES = (
     "openai", "anthropic", "openai_compatible", "elevenlabs",
-    "cartesia", "fishaudio", "inworld", "minimax",
+    "cartesia", "fishaudio", "inworld", "minimax", "deepgram", "google_tts",
     "groq", "openrouter", "search", "local_llm",
 )
 

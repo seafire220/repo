@@ -162,6 +162,17 @@ jobs:
           Devices with this image send their owners here for the source code (settings page → Licences and notices).
           Publish this release before selling them, and keep it for at least three years after the last one is sold.
           EOF
+          # A draft of this version from an earlier run is replaced; a published one is never overwritten.
+          old="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"device-image-$VERSION\") | \"\\(.id) \\(.draft)\"" | head -n 1)"
+          if [ -n "$old" ]; then
+            if [ "${old#* }" = true ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/${old% *}"
+              echo "Replaced the earlier draft of device-image-$VERSION."
+            else
+              echo "::error::device-image-$VERSION is already published: give this build a new version."
+              exit 1
+            fi
+          fi
           flags="--draft"
           if [ "$MODE" = publish ]; then flags=""; fi
           # Not the repository's "latest" release: that stays Character Studio's, for its download links.

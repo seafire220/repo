@@ -12,6 +12,7 @@ import base64
 import io
 import ipaddress
 import json
+import os
 import re
 import secrets
 import socket
@@ -699,7 +700,8 @@ VOICE_CLONING_PROVIDERS = {
         "secret": "fishaudio",
         "default_model": "s2.1-pro",
         "max_bytes": 20 * 1024 * 1024,
-        "formats": ("wav", "mp3", "m4a", "ogg"),
+        # The formats Fish Audio documents for voice samples.
+        "formats": ("wav", "mp3", "flac"),
         "languages": False,
     },
     "inworld": {
@@ -707,7 +709,8 @@ VOICE_CLONING_PROVIDERS = {
         "secret": "inworld",
         "default_model": "inworld-tts-2",
         "max_bytes": 12 * 1024 * 1024,
-        "formats": ("wav", "mp3", "webm"),
+        # Inworld's API takes WAV and MP3 samples (its web page takes WebM too), and uses the first 30 s.
+        "formats": ("wav", "mp3"),
         "languages": True,
     },
     "minimax": {
@@ -720,13 +723,13 @@ VOICE_CLONING_PROVIDERS = {
     },
 }
 
-TTS_PROVIDERS = ("local",) + tuple(VOICE_CLONING_PROVIDERS) + tuple(OPENAI_COMPATIBLE)
-
-_INWORLD_LANGS = {
-    "auto": "AUTO", "en": "EN_US", "zh": "ZH_CN", "ja": "JA_JP", "ko": "KO_KR",
-    "es": "ES_ES", "fr": "FR_FR", "de": "DE_DE", "it": "IT_IT", "pt": "PT_BR",
-    "ru": "RU_RU", "ar": "AR_SA", "pl": "PL_PL", "nl": "NL_NL",
+# Voice services with voices to choose from, but no cloning through their API.
+VOICE_ONLY_PROVIDERS = {
+    "deepgram": {"label": "Deepgram", "secret": "deepgram"},
+    "google": {"label": "Google Cloud", "secret": "google_tts"},
 }
+
+TTS_PROVIDERS = ("local",) + tuple(VOICE_CLONING_PROVIDERS) + tuple(VOICE_ONLY_PROVIDERS) + tuple(OPENAI_COMPATIBLE)
 
 
 def _bearer(key):
@@ -768,11 +771,16 @@ def _cartesia_lang(language):
 
 
 def _inworld_lang(language):
-    raw = (language or "en").strip()
-    if re.fullmatch(r"[A-Z]{2}_[A-Z]{2}", raw) or raw == "AUTO":
-        return raw
-    code = raw.lower().replace("_", "-").split("-")[0]
-    return _INWORLD_LANGS.get(code, "AUTO")
+    """Inworld's `languageCode`: a locale such as "en", "ja" or "en-GB" ("en" picks its default accent), or
+    None to let Inworld detect the language from the recording. (The older `langCode` enum knows only 15
+    languages.)"""
+    raw = (language or "en").strip().replace("_", "-")
+    if not raw or raw.lower() == "auto":
+        return None
+    parts = raw.split("-")
+    if not re.fullmatch(r"[A-Za-z]{2,3}", parts[0]):
+        return None
+    return "-".join([parts[0].lower()] + [p.upper() if len(p) == 2 else p for p in parts[1:]])
 
 
 def _minimax_voice_id(name):
@@ -915,16 +923,24 @@ class CartesiaTTS:
                 raise ProviderError("Cartesia could not be reached (%s)" % type(error).__name__, retry=True)
 
     async def voices(self):
+        # The owner's own voices (their clones) are asked for separately: the library's first page of 100
+        # need not include them.
+        raw = []
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             try:
-                async with session.get(self.base_url + "/voices?limit=100", headers=self._headers()) as r:
-                    if r.status != 200:
-                        raise _status_error("Cartesia", r.status, await r.text())
-                    data = await r.json(content_type=None)
+                for query in ("is_owner=true&limit=100", "limit=100"):
+                    async with session.get(self.base_url + "/voices?" + query, headers=self._headers()) as r:
+                        if r.status != 200:
+                            raise _status_error("Cartesia", r.status, await r.text())
+                        data = await r.json(content_type=None)
+                    raw += data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
             except aiohttp.ClientError as error:
                 raise ProviderError("Cartesia could not be reached (%s)" % type(error).__name__, retry=True)
-        raw = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        items = [v for v in raw if isinstance(v, dict) and v.get("id")]
+        items, seen = [], set()
+        for v in raw:
+            if isinstance(v, dict) and v.get("id") and v["id"] not in seen:
+                seen.add(v["id"])
+                items.append(v)
         items.sort(key=lambda v: 0 if v.get("is_owner") else 1)
         return [{"id": v["id"],
                  "name": "%s (yours)" % v.get("name", v["id"]) if v.get("is_owner")
@@ -1115,21 +1131,32 @@ class InworldTTS:
 
     async def voices(self):
         headers = {"Authorization": _inworld_auth(self.key)}
+        found = []
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             try:
-                async with session.get(self.base_url + "/voices/v1/voices", headers=headers) as r:
-                    if r.status == 404:
-                        async with session.get(self.base_url + "/tts/v1/voices", headers=headers) as r2:
-                            if r2.status != 200:
-                                raise _status_error("Inworld AI", r2.status, await r2.text())
-                            data = await r2.json(content_type=None)
-                    elif r.status != 200:
-                        raise _status_error("Inworld AI", r.status, await r.text())
-                    else:
+                token = ""
+                for _ in range(5):                      # up to 2,500 voices
+                    query = {"pageSize": "500"}
+                    if token:
+                        query["pageToken"] = token
+                    async with session.get(self.base_url + "/voices/v1/voices", params=query, headers=headers) as r:
+                        if r.status == 404 and not found:
+                            async with session.get(self.base_url + "/tts/v1/voices", headers=headers) as r2:
+                                if r2.status != 200:
+                                    raise _status_error("Inworld AI", r2.status, await r2.text())
+                                data = await r2.json(content_type=None)
+                            found += (data or {}).get("voices", [])
+                            break
+                        if r.status != 200:
+                            raise _status_error("Inworld AI", r.status, await r.text())
                         data = await r.json(content_type=None)
+                    found += (data or {}).get("voices", [])
+                    token = (data or {}).get("nextPageToken") or ""
+                    if not token:
+                        break
             except aiohttp.ClientError as error:
                 raise ProviderError("Inworld AI could not be reached (%s)" % type(error).__name__, retry=True)
-        items = [v for v in (data or {}).get("voices", []) if isinstance(v, dict) and v.get("voiceId")]
+        items = [v for v in found if isinstance(v, dict) and v.get("voiceId")]
         is_custom = lambda v: bool(v.get("isCustom") or v.get("owned") or v.get("source") in ("IVC", "PVC", "TVD"))
         items.sort(key=lambda v: 0 if is_custom(v) else 1)
         return [{"id": v["voiceId"],
@@ -1147,10 +1174,12 @@ async def clone_voice_inworld(key, name, sample, language="en", base_url=None):
     """Make an instant cloned voice on Inworld AI; returns its voiceId."""
     body = {
         "displayName": (name or "Voice")[:100],
-        "langCode": _inworld_lang(language),
         "voiceSamples": [{"audioData": base64.b64encode(sample).decode("ascii")}],
-        "audioProcessingConfig": {"removeBackgroundNoise": True},
+        "audioProcessingConfig": {"removeBackgroundNoise": False},
     }
+    code = _inworld_lang(language)
+    if code:
+        body["languageCode"] = code
     headers = {"Authorization": _inworld_auth(key), "Content-Type": "application/json"}
     url = (base_url or InworldTTS.base_url).rstrip("/") + "/voices/v1/voices:clone"
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
@@ -1305,9 +1334,158 @@ async def clone_voice_minimax(key, name, sample, filename="sample.wav", content_
                     raise _status_error("MiniMax", r.status, await r.text())
                 cloned = await r.json(content_type=None)
             _minimax_check(cloned)
+            await _minimax_first_use(session, base, auth, voice_id)
         except aiohttp.ClientError as error:
             raise ProviderError("MiniMax could not be reached (%s)" % type(error).__name__, retry=True)
     return voice_id
+
+
+async def _minimax_first_use(session, base, auth, voice_id):
+    """MiniMax keeps a cloned voice only once it has spoken (it deletes one unused for 7 days), so the new
+    voice says one word now. A failure here is not the clone's: the character's first words use it too."""
+    body = {"model": "speech-2.8-turbo", "text": "Hello.", "stream": False,
+            "voice_setting": {"voice_id": voice_id},
+            "audio_setting": {"sample_rate": 24000, "format": "pcm", "channel": 1}}
+    try:
+        async with session.post(base + "/t2a_v2", json=body, headers={**auth, "Content-Type": "application/json"}) as r:
+            if r.status == 200:
+                _minimax_check(await r.json(content_type=None))
+    except (ProviderError, aiohttp.ClientError, ValueError):
+        pass
+
+
+def _token(key):
+    key = (key or "").strip()
+    return key if key.lower().startswith(("token ", "bearer ")) else "Token " + key
+
+
+def _deepgram_voices():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepgram_voices.json"),
+                  encoding="utf-8") as f:
+            return json.load(f).get("voices", [])
+    except (OSError, ValueError):
+        return []
+
+
+class DeepgramTTS:
+    """Deepgram's voices, streamed as raw 24 kHz PCM: Flux TTS (its newest, /v2/speak) and Aura-2 (/v1/speak).
+    The voice is the model's name, such as flux-hannah-en or aura-2-thalia-en. No cloning."""
+
+    rate = 24000
+    base_url = "https://api.deepgram.com"
+    default_voice = "flux-hannah-en"
+
+    def __init__(self, key, voice="", model="", require_voice=True):
+        if not key:
+            raise ProviderError("no Deepgram key is set")
+        self.key = key
+        self.voice = (voice or model or self.default_voice).strip()
+
+    async def stream(self, text):
+        version = "v2" if self.voice.startswith("flux-") else "v1"
+        params = {"model": self.voice, "encoding": "linear16", "container": "none", "sample_rate": str(self.rate)}
+        headers = {"Authorization": _token(self.key)}
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post("%s/%s/speak" % (self.base_url, version), params=params, json={"text": text},
+                                        headers=headers) as r:
+                    if r.status != 200:
+                        raise _status_error("Deepgram", r.status, await r.text())
+                    async for chunk in r.content.iter_chunked(4800):
+                        yield chunk
+            except aiohttp.ClientError as error:
+                raise ProviderError("Deepgram could not be reached (%s)" % type(error).__name__, retry=True)
+
+    async def voices(self):
+        return [dict(v) for v in _deepgram_voices()]
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
+
+
+def _wav_pcm(data, rate):
+    """The 16-bit mono samples inside a WAV file, which must be at `rate`."""
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            if w.getsampwidth() != 2 or w.getnchannels() != 1 or w.getframerate() != rate:
+                raise ProviderError("the voice service sent %d-channel %d-bit audio at %d Hz, not 16-bit mono at %d Hz"
+                                    % (w.getnchannels(), w.getsampwidth() * 8, w.getframerate(), rate))
+            return w.readframes(w.getnframes())
+    except (wave.Error, EOFError):
+        raise ProviderError("the voice service's audio could not be read")
+
+
+class GoogleTTS:
+    """Google Cloud Text-to-Speech voices (Chirp 3 HD and the others) as 24 kHz PCM. The key is a Google Cloud
+    API key with the Text-to-Speech API enabled. No cloning (Google's custom voices need its approval)."""
+
+    rate = 24000
+    base_url = "https://texttospeech.googleapis.com/v1"
+    default_voice = "en-US-Chirp3-HD-Aoede"
+
+    def __init__(self, key, voice="", model="", require_voice=True):
+        if not key:
+            raise ProviderError("no Google Cloud key is set")
+        self.key = key
+        self.voice = (voice or self.default_voice).strip()
+
+    def _headers(self):
+        return {"X-Goog-Api-Key": self.key.strip()}
+
+    async def stream(self, text):
+        language = "-".join(self.voice.split("-")[:2]) or "en-US"
+        body = {"input": {"text": text}, "voice": {"languageCode": language, "name": self.voice},
+                "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": self.rate}}
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/text:synthesize", json=body, headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("Google Cloud", r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("Google Cloud could not be reached (%s)" % type(error).__name__, retry=True)
+        try:
+            audio = base64.b64decode((data or {}).get("audioContent") or "")
+        except ValueError:
+            raise ProviderError("Google Cloud's audio could not be read")
+        # LINEAR16 comes as a WAV file (with its header); the device wants the samples alone.
+        pcm = _wav_pcm(audio, self.rate) if audio[:4] == b"RIFF" else audio
+        for start in range(0, len(pcm), 4800):
+            yield pcm[start:start + 4800]
+
+    async def voices(self):
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.get(self.base_url + "/voices", params={"languageCode": "en"},
+                                       headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("Google Cloud", r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("Google Cloud could not be reached (%s)" % type(error).__name__, retry=True)
+        out = []
+        for v in (data or {}).get("voices", []):
+            name = v.get("name") if isinstance(v, dict) else None
+            if not name:
+                continue
+            parts = name.split("-")
+            kind = " ".join(parts[2:-1]) if len(parts) > 3 else ""
+            who = {"FEMALE": "woman", "MALE": "man"}.get(v.get("ssmlGender"), "voice")
+            out.append({"id": name, "name": "%s (%s %s%s)" % (parts[-1], "-".join(parts[:2]), who,
+                                                              ", " + kind if kind else ""),
+                        "_rank": 0 if "Chirp3" in name else 1 if ("Chirp" in name or "Studio" in name) else 2})
+        out.sort(key=lambda v: (v["_rank"], v["id"]))
+        return [{"id": v["id"], "name": v["name"]} for v in out]
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
 
 
 async def clone_voice(provider, key, name, sample, language="en"):
@@ -1401,6 +1579,10 @@ def build_tts(settings, store, voice=None, model_dir=None, provider=None, requir
         return InworldTTS(store.secret("inworld"), chosen, model, require_voice=require_voice)
     if active == "minimax":
         return MiniMaxTTS(store.secret("minimax"), chosen, model, require_voice=require_voice)
+    if active == "deepgram":
+        return DeepgramTTS(store.secret("deepgram"), chosen)
+    if active == "google":
+        return GoogleTTS(store.secret("google_tts"), chosen)
     if active in OPENAI_COMPATIBLE:
         known = OPENAI_COMPATIBLE[active]
         base = (tts.get("base_url") if same_provider else "") or known["base_url"]

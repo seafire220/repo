@@ -6,9 +6,12 @@ const KEY_NAMES = {
   openai: "OpenAI", anthropic: "Anthropic", groq: "Groq", openrouter: "OpenRouter",
   openai_compatible: "Gemini / other", elevenlabs: "ElevenLabs", cartesia: "Cartesia",
   fishaudio: "Fish Audio", inworld: "Inworld AI", minimax: "MiniMax", deepgram: "Deepgram",
+  google_tts: "Google Cloud (voice)",
   search: "Web search", local_llm: "Your own model server",
 };
-const VOICE_LIST_PROVIDERS = new Set(["local", "elevenlabs", "cartesia", "fishaudio", "inworld", "minimax"]);
+const VOICE_LIST_PROVIDERS = new Set(["local", "elevenlabs", "cartesia", "fishaudio", "inworld", "minimax", "deepgram", "google"]);
+// Services where the voice alone says everything (no model to choose).
+const NO_MODEL = new Set(["local", "deepgram", "google"]);
 const CLONE_INFO = {
   elevenlabs: {
     label: "ElevenLabs", key: "elevenlabs", languages: false,
@@ -22,18 +25,18 @@ const CLONE_INFO = {
   },
   fishaudio: {
     label: "Fish Audio", key: "fishaudio", languages: false,
-    accept: ".wav,.mp3,.m4a,.ogg,audio/*",
-    hint: "Clear WAV, MP3, M4A or OGG clip (10–60 seconds, up to 20 MB).",
+    accept: ".wav,.mp3,.flac,audio/*",
+    hint: "Clear WAV, MP3 or FLAC clip (10–30 seconds is best, up to 20 MB).",
   },
   inworld: {
     label: "Inworld AI", key: "inworld", languages: true,
-    accept: ".wav,.mp3,.webm,audio/*",
-    hint: "Clear WAV, MP3 or WebM clip (5–15 seconds, up to 12 MB).",
+    accept: ".wav,.mp3,audio/*",
+    hint: "Clear WAV or MP3 clip (3 to 30 seconds; Inworld uses the first 30), up to 12 MB.",
   },
   minimax: {
     label: "MiniMax", key: "minimax", languages: false,
     accept: ".wav,.mp3,.m4a,audio/*",
-    hint: "Clear WAV, MP3 or M4A clip (10 seconds to 5 minutes, up to 20 MB). Speak with it once within 7 days so MiniMax keeps it.",
+    hint: "Clear WAV, MP3 or M4A clip (10 seconds to 5 minutes, up to 20 MB). The new voice says one word at once: MiniMax deletes cloned voices that have never spoken within 7 days.",
   },
 };
 let state = { active: "", characters: [], settings: null, editing: "" };
@@ -437,7 +440,8 @@ function setStatus(s) {
 function showSteps(s) {
   const keyFor = { openai: "openai", anthropic: "anthropic", groq: "groq", openrouter: "openrouter",
                    gemini: "openai_compatible", custom: "openai_compatible", elevenlabs: "elevenlabs",
-                   cartesia: "cartesia", fishaudio: "fishaudio", inworld: "inworld", minimax: "minimax" };
+                   cartesia: "cartesia", fishaudio: "fishaudio", inworld: "inworld", minimax: "minimax",
+                   deepgram: "deepgram", google: "google_tts" };
   const hasKey = (p) => !p || p === "local" || !keyFor[p] || s.keys[keyFor[p]];
   const steps = [
     ["Choose a language model and add its key", s.providers.llm && hasKey(s.providers.llm), "services"],
@@ -1122,6 +1126,8 @@ const SERVICES = {
   fishaudio: { key: "fishaudio", hint: "Get a key at fish.audio → API keys (includes a free model: s2.1-pro-free).", tts: "s2.1-pro" },
   inworld: { key: "inworld", hint: "Get a Basic key at platform.inworld.ai → Settings → API keys.", tts: "inworld-tts-2" },
   minimax: { key: "minimax", hint: "Get a key at platform.minimax.io → API keys.", tts: "speech-2.8-turbo" },
+  deepgram: { key: "deepgram", hint: "Get a key at console.deepgram.com → API keys. The voice is its model name: press List voices.", tts: "" },
+  google: { key: "google_tts", hint: "A Google Cloud API key with the Text-to-Speech API turned on (console.cloud.google.com → APIs & Services). Press List voices; Chirp 3 HD voices sound best.", tts: "" },
   local: { key: "", hint: "Runs on the device: no key and no cost." },
   selfhosted: { key: "local_llm", hint: "Free, and private: the model runs on your own computer. A key only if your server asks for one.", llm: "press Find on my network, or List models" },
 };
@@ -1177,7 +1183,7 @@ function shapeGroup(group) {
   if (address) address.placeholder = provider === "selfhosted" ? "e.g. 192.168.1.20 or my-laptop.local" : "https://…/v1";
   for (const el of box.querySelectorAll(".for-anthropic")) el.hidden = provider !== "anthropic";
   for (const el of box.querySelectorAll(".for-elevenlabs")) el.hidden = provider !== "elevenlabs";
-  for (const el of box.querySelectorAll(".for-cloud")) el.hidden = provider === "local";
+  for (const el of box.querySelectorAll(".for-cloud")) el.hidden = group === "tts" ? NO_MODEL.has(provider) : provider === "local";
   for (const el of box.querySelectorAll(".for-local")) el.hidden = provider !== "local";
   for (const el of box.querySelectorAll(".for-voicelist")) el.hidden = !VOICE_LIST_PROVIDERS.has(provider);
   const model = $(group + "-model");

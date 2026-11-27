@@ -287,11 +287,19 @@ class VoiceCloningProvidersTest(unittest.IsolatedAsyncioTestCase):
         ])
         self.addAsyncCleanup(server.close)
         with mock.patch.object(InworldTTS, "base_url", base):
-            vid = await providers.clone_voice("inworld", "rawBase64Creds==", "Aria", SAMPLE_WEBM, language="ja")
+            vid = await providers.clone_voice("inworld", "rawBase64Creds==", "Aria", SAMPLE_MP3, language="ja")
             self.assertEqual(vid, "ws__aria_clone")
             self.assertEqual(seen["clone_auth"], "Basic rawBase64Creds==")
-            self.assertEqual(seen["clone_body"]["langCode"], "JA_JP")
-            self.assertEqual(base64.b64decode(seen["clone_body"]["voiceSamples"][0]["audioData"]), SAMPLE_WEBM)
+            self.assertEqual(seen["clone_body"]["languageCode"], "ja")
+            self.assertNotIn("langCode", seen["clone_body"])
+            self.assertFalse(seen["clone_body"]["audioProcessingConfig"]["removeBackgroundNoise"])
+            self.assertEqual(base64.b64decode(seen["clone_body"]["voiceSamples"][0]["audioData"]), SAMPLE_MP3)
+            # Inworld's API takes WAV and MP3 only.
+            with self.assertRaises(ProviderError):
+                await providers.clone_voice("inworld", "rawBase64Creds==", "Aria", SAMPLE_WEBM)
+            # "auto" leaves the language for Inworld to detect.
+            await providers.clone_voice("inworld", "rawBase64Creds==", "Aria", SAMPLE_WAV, language="auto")
+            self.assertNotIn("languageCode", seen["clone_body"])
 
             # Already-prefixed "Basic ..." key should not be double-prefixed.
             tts = InworldTTS("Basic rawBase64Creds==", vid)
@@ -330,6 +338,7 @@ class VoiceCloningProvidersTest(unittest.IsolatedAsyncioTestCase):
         async def t2a(request):
             body = await request.json()
             seen["t2a_body"] = body
+            seen.setdefault("spoken", []).append((body["text"], body["voice_setting"]["voice_id"], body.get("stream")))
             if body["text"] == "BAD_KEY":
                 return web.json_response({"base_resp": {"status_code": 1004, "status_msg": "invalid api key"}})
             sse = (
@@ -363,6 +372,8 @@ class VoiceCloningProvidersTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(seen["upload_parts"]["file"][0], "sample.m4a")
             self.assertEqual(seen["clone_body"]["file_id"], 123456789)
             self.assertEqual(seen["clone_body"]["voice_id"], vid)
+            self.assertEqual(seen["spoken"], [("Hello.", vid, False)],
+                             "a new clone speaks once, or MiniMax deletes it after 7 days")
 
             tts = MiniMaxTTS("mm-key", vid)
             pcm = b"".join([c async for c in tts.stream("Hello MiniMax!")])
@@ -541,6 +552,132 @@ class DeviceAndConsoleVoiceCloningTest(unittest.IsolatedAsyncioTestCase):
             await providers.clone_voice("inworld", "iw-key", "Aria", SAMPLE_WAV + b"\0" * (12 * 1024 * 1024))
         self.assertIn("12 MB", str(ctx.exception))
 
+
+
+class MoreVoiceServicesTest(unittest.IsolatedAsyncioTestCase):
+    """Deepgram and Google Cloud (voices without cloning), and the voice lists' completeness."""
+
+    async def test_deepgram_flux_and_aura_voices_stream_raw_pcm(self):
+        seen = []
+
+        async def speak(request):
+            seen.append((request.path, dict(request.query), request.headers.get("Authorization"), await request.json()))
+            return web.Response(body=b"\x01\x02" * 300, content_type="application/octet-stream")
+
+        server, base = await start_mock([("POST", "/v1/speak", speak), ("POST", "/v2/speak", speak)])
+        self.addAsyncCleanup(server.close)
+        with mock.patch.object(providers.DeepgramTTS, "base_url", base):
+            tts = providers.DeepgramTTS("dg-key", "")
+            self.assertEqual(tts.voice, "flux-hannah-en", "a voice to start with")
+            pcm = b"".join([c async for c in tts.stream("Hello there.")])
+            self.assertEqual(len(pcm), 600)
+            path, query, auth, body = seen[-1]
+            self.assertEqual(path, "/v2/speak", "Flux voices are on /v2")
+            self.assertEqual(query, {"model": "flux-hannah-en", "encoding": "linear16", "container": "none",
+                                     "sample_rate": "24000"})
+            self.assertEqual(auth, "Token dg-key")
+            self.assertEqual(body, {"text": "Hello there."})
+            tts = providers.DeepgramTTS("Token dg-key", "aura-2-thalia-en")
+            _ = [c async for c in tts.stream("Hi.")]
+            self.assertEqual(seen[-1][0], "/v1/speak", "Aura-2 voices are on /v1")
+            self.assertEqual(seen[-1][2], "Token dg-key", "a key pasted with its Token prefix is not doubled")
+        voices = await providers.DeepgramTTS("dg-key").voices()
+        ids = [v["id"] for v in voices]
+        self.assertGreater(len(voices), 60)
+        self.assertIn("flux-hannah-en", ids)
+        self.assertIn("aura-2-thalia-en", ids)
+        self.assertEqual(len(ids), len(set(ids)))
+
+    async def test_google_voice_wav_header_is_removed_and_voices_listed_best_first(self):
+        seen = {}
+        pcm = b"\x05\x06" * 2400
+
+        async def synthesize(request):
+            seen["key"] = request.headers.get("X-Goog-Api-Key")
+            seen["body"] = await request.json()
+            return web.json_response({"audioContent": base64.b64encode(providers.pcm_to_wav(pcm, 24000)).decode()})
+
+        async def voices(request):
+            seen["voices_query"] = dict(request.query)
+            return web.json_response({"voices": [
+                {"name": "en-US-Standard-A", "ssmlGender": "MALE", "languageCodes": ["en-US"]},
+                {"name": "en-GB-Chirp3-HD-Aoede", "ssmlGender": "FEMALE", "languageCodes": ["en-GB"]},
+                {"name": "en-AU-Neural2-B", "ssmlGender": "MALE", "languageCodes": ["en-AU"]},
+            ]})
+
+        async def wrong_rate(request):
+            return web.json_response({"audioContent": base64.b64encode(providers.pcm_to_wav(pcm, 16000)).decode()})
+
+        server, base = await start_mock([("POST", "/text:synthesize", synthesize), ("GET", "/voices", voices)])
+        self.addAsyncCleanup(server.close)
+        with mock.patch.object(providers.GoogleTTS, "base_url", base):
+            tts = providers.GoogleTTS("goog-key", "en-GB-Chirp3-HD-Aoede")
+            got = b"".join([c async for c in tts.stream("Hello.")])
+            self.assertEqual(got, pcm, "the samples alone, without the WAV header")
+            self.assertEqual(seen["key"], "goog-key")
+            self.assertEqual(seen["body"]["voice"], {"languageCode": "en-GB", "name": "en-GB-Chirp3-HD-Aoede"})
+            self.assertEqual(seen["body"]["audioConfig"], {"audioEncoding": "LINEAR16", "sampleRateHertz": 24000})
+            listed = await tts.voices()
+            self.assertEqual(seen["voices_query"], {"languageCode": "en"})
+            self.assertEqual([v["id"] for v in listed], ["en-GB-Chirp3-HD-Aoede", "en-AU-Neural2-B", "en-US-Standard-A"])
+            self.assertEqual(listed[0]["name"], "Aoede (en-GB woman, Chirp3 HD)")
+        server2, base2 = await start_mock([("POST", "/text:synthesize", wrong_rate)])
+        self.addAsyncCleanup(server2.close)
+        with mock.patch.object(providers.GoogleTTS, "base_url", base2):
+            with self.assertRaises(ProviderError):
+                _ = [c async for c in providers.GoogleTTS("goog-key").stream("Hello.")]
+
+    async def test_cartesia_lists_the_owners_clones_even_beyond_the_librarys_first_page(self):
+        queries = []
+
+        async def list_voices(request):
+            queries.append(dict(request.query))
+            if request.query.get("is_owner") == "true":
+                return web.json_response({"data": [{"id": "own-9", "name": "Aria", "is_owner": True}]})
+            return web.json_response({"data": [{"id": "pub-%d" % i, "name": "Voice %d" % i, "is_owner": False}
+                                               for i in range(100)]})
+
+        server, base = await start_mock([("GET", "/voices", list_voices)])
+        self.addAsyncCleanup(server.close)
+        with mock.patch.object(CartesiaTTS, "base_url", base):
+            listed = await CartesiaTTS("sk_car_abc", "", require_voice=False).voices()
+        self.assertEqual(listed[0], {"id": "own-9", "name": "Aria (yours)"})
+        self.assertEqual(len(listed), 101)
+        self.assertIn({"is_owner": "true", "limit": "100"}, queries)
+
+    async def test_inworld_reads_every_page_of_voices(self):
+        queries = []
+
+        async def list_voices(request):
+            queries.append(dict(request.query))
+            if request.query.get("pageToken") == "p2":
+                return web.json_response({"voices": [{"voiceId": "ws__mine", "displayName": "Mine", "source": "IVC"}]})
+            return web.json_response({"voices": [{"voiceId": "Ashley", "displayName": "Ashley", "source": "SYSTEM"}],
+                                      "nextPageToken": "p2"})
+
+        server, base = await start_mock([("GET", "/voices/v1/voices", list_voices)])
+        self.addAsyncCleanup(server.close)
+        with mock.patch.object(InworldTTS, "base_url", base):
+            listed = await InworldTTS("creds", "", require_voice=False).voices()
+        self.assertEqual(listed, [{"id": "ws__mine", "name": "Mine (yours)"}, {"id": "Ashley", "name": "Ashley"}])
+        self.assertEqual(queries, [{"pageSize": "500"}, {"pageSize": "500", "pageToken": "p2"}])
+
+    def test_every_voice_service_is_built_from_the_settings_with_its_own_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(tmp)
+            for name in ("deepgram", "google_tts"):
+                store.set_secret(name, name + "-key-123456")
+            settings = store.settings()
+            settings["tts"] = {"provider": "deepgram", "voice": "aura-2-thalia-en", "model": "", "base_url": "", "speed": 1}
+            tts = providers.build_tts(settings, store)
+            self.assertIsInstance(tts, providers.DeepgramTTS)
+            self.assertEqual((tts.key, tts.voice), ("deepgram-key-123456", "aura-2-thalia-en"))
+            tts = providers.build_tts(settings, store, provider="google")
+            self.assertIsInstance(tts, providers.GoogleTTS)
+            self.assertEqual((tts.key, tts.voice), ("google_tts-key-123456", "en-US-Chirp3-HD-Aoede"))
+            self.assertIn("deepgram", providers.TTS_PROVIDERS)
+            self.assertIn("google", providers.TTS_PROVIDERS)
+            self.assertNotIn("deepgram-key-123456", redact("key deepgram-key-123456 used", store))
 
 if __name__ == "__main__":
     unittest.main()

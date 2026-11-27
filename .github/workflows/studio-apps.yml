@@ -254,6 +254,17 @@ jobs:
           CharacterStudio-appimage-runtime-source.tar.gz is the source code of the AppImage runtime inside the
           Linux app, whose libfuse is under the GNU LGPL 2.1. SHA256SUMS.txt has the files' checksums.
           EOF
+          # A draft of this version from an earlier run is replaced; a published one is never overwritten.
+          old="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"studio-v$VERSION\") | \"\\(.id) \\(.draft)\"" | head -n 1)"
+          if [ -n "$old" ]; then
+            if [ "${old#* }" = true ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/${old% *}"
+              echo "Replaced the earlier draft of studio-v$VERSION."
+            else
+              echo "::error::studio-v$VERSION is already published: give this build a new version."
+              exit 1
+            fi
+          fi
           flags="--draft"
           if [ "$MODE" = publish ]; then flags="--latest"; fi
           gh release create "studio-v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
