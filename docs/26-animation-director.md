@@ -447,7 +447,7 @@ phone recording costs it no video decoding or model running at all.
   played, a look down on "sorry"), and time alone (an idle glance). Plus the
   settings page in a browser against the virtual device: the live view,
   temperament, switches, and trying and saving a changed gesture.
-- Recording with a phone (`core/tests/test_phone_record.py`, 22 tests):
+- Recording with a phone (`core/tests/test_phone_record.py`, 23 tests):
   codes (alphabet, expiry, a new one ends the old, guessing stopped), every
   malformed number a phone could send refused, the routes (owner-only
   link, no login on the phone, the header, the recorder alone allowed

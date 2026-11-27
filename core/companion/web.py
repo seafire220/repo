@@ -537,8 +537,11 @@ class Console:
         if hasattr(self.device.stage, "define"):
             self.device.stage.define(name, entry)
 
-    def _try_on_screen(self, entry):
-        """Play a clip on the screen without keeping it; False when the screen is not running."""
+    def _try_on_screen(self, entry, character=False):
+        """Play a clip on the screen without keeping it; False when the screen is not running (or, with
+        `character`, when it shows no character)."""
+        if character and not self.device.active_id():
+            return False
         link = self.device.stage
         if not hasattr(link, "define") or not link.define(motions.TRY, entry):
             return False
@@ -1268,7 +1271,7 @@ class Console:
         seconds = max(keys[-1][0] for keys in tracks.values())
         session.update(tracks=tracks, moves=moves, seconds=seconds, state="ready")
         entry = phone_record.entry(tracks, bool(body.get("mirror")))
-        played = self._try_on_screen(motions.clean(motions.TRY, entry))
+        played = self._try_on_screen(motions.clean(motions.TRY, entry), character=True)
         self._record_changed()
         return web.json_response({"ok": True, "moves": moves, "seconds": seconds, "played": played,
                                   "can": self._can_make(entry)})
@@ -1280,9 +1283,8 @@ class Console:
         if not session.get("tracks"):
             raise web.HTTPConflict(text="send a gesture first")
         entry = phone_record.entry(session["tracks"], bool(body.get("mirror")))
-        if not self._try_on_screen(motions.clean(motions.TRY, entry)):
-            raise web.HTTPServiceUnavailable(text="the character's screen is not running")
-        return web.json_response({"ok": True, "can": self._can_make(entry)})
+        played = self._try_on_screen(motions.clean(motions.TRY, entry), character=True)
+        return web.json_response({"ok": True, "played": played, "can": self._can_make(entry)})
 
     async def record_save(self, request):
         """Keep the gesture with the others, under the name the phone gave it."""

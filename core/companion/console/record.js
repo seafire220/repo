@@ -149,6 +149,9 @@ function chosen(input) {
     trimmed();
     show("trim");
   }, { once: true });
+  video.addEventListener("error", () => {
+    problem("This phone's browser cannot open that video. Film it again, or choose another.");
+  }, { once: true });
   video.load();
 }
 
@@ -310,7 +313,7 @@ async function send(payload) {
 
 function noteFor(answer) {
   say($("result-note"), answer.played === false
-    ? "The device's screen is not showing a character just now, so it cannot play it; you can still keep it."
+    ? "The device's screen is not showing a character just now, so it cannot play it there; you can still keep it."
     : answer.can === false
       ? "This character cannot make all of that movement, so it may not show it; characters that can will."
       : "Not quite right? Play it again, swap left and right, or film it again.");

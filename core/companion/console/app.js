@@ -450,6 +450,10 @@ async function startRecording() {
     showRecording(await api("POST", "/api/record", {}));
   } catch (err) { text($("rec-msg"), err.message); }
 }
+// While a link is open, the minutes it has left (and its end) show without a reload.
+setInterval(() => {
+  if (recording && !$("animation").hidden) loadRecording().catch(() => {});
+}, 60000);
 $("btn-rec-start").addEventListener("click", startRecording);
 $("btn-rec-new").addEventListener("click", startRecording);
 $("btn-rec-end").addEventListener("click", async () => {

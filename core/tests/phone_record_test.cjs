@@ -5,13 +5,14 @@
 //
 //   python3 tests/virtual_device.py DATA PORT HOST     (HOST: this computer's network address, so the phone's
 //                                                       page is plain http off localhost, as on a home network)
-//   node tests/phone_record_test.cjs http://HOST:PORT VIDEO SHOT_DIR
+//   node tests/phone_record_test.cjs http://HOST:PORT CHAR_FILE VIDEO SHOT_DIR
 //
+// CHAR_FILE: any character package (as for console_test.cjs), so the screen shows a character.
 // VIDEO: a few seconds of a person facing the camera and moving their head (any phone video of someone who
 // agreed to it). The device downloads MediaPipe's files (24 MB) when first asked, unless DATA/models/mocap has
 // them already (python3 -m companion.mocap_assets DATA/models/mocap).
 const { chromium, devices } = require("playwright");
-const [base, video, shots] = process.argv.slice(2);
+const [base, charFile, video, shots] = process.argv.slice(2);
 const checks = [];
 const check = (name, ok, extra) => { checks.push([name, !!ok]); console.log((ok ? "PASS " : "FAIL ") + name + (extra ? "  [" + extra + "]" : "")); };
 const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(base);
@@ -34,6 +35,9 @@ const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(base);
   await owner.fill("#login-password", "a good password");
   await owner.click("#login-form button");
   await owner.waitForSelector("#home:not([hidden])");
+  await owner.click("#tabs button[data-tab=characters]");
+  await owner.setInputFiles("#char-file", charFile);
+  await owner.waitForSelector("#char-list li");
   await owner.click("#tabs button[data-tab=animation]");
   await owner.click("#btn-rec-start");
   await owner.waitForSelector("#rec-box:not([hidden])");
@@ -52,7 +56,8 @@ const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(base);
   phone.on("request", (r) => { if (r.url().endsWith("/motion")) sent = r.postDataJSON(); });
   await phone.goto(link);
   await phone.waitForSelector("#film:not([hidden])");
-  check("the phone opens the recorder without a password", true);
+  check("the phone opens the recorder without a password", (await phone.textContent("#for")).startsWith("for "),
+    await phone.textContent("#for"));
   if (!local) check("as plain http on the network: not a secure context", !(await phone.evaluate(() => window.isSecureContext)));
   await saysOn(owner, "has the recorder open");
   check("the settings page sees the phone open it", true);

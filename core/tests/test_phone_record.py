@@ -17,11 +17,12 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 
-from companion import mocap, mocap_assets, motions, phone_record  # noqa: E402
+from companion import mocap, mocap_assets, motions, package, phone_record  # noqa: E402
 from companion.audio import Speaker  # noqa: E402
 from companion.device import Device  # noqa: E402
 from companion.web import RECORD_CSP, make_app  # noqa: E402
 from fakes import FakeStage  # noqa: E402
+from test_package import good_files, manifest  # noqa: E402
 
 H = {"X-Companion": "1"}
 
@@ -271,6 +272,7 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
         self.stage.controls = [{"control": c} for c in ("head_yaw", "head_pitch", "head_roll", "smile", "shoulders")]
         self.device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=self.stage,
                              provider_factory=lambda which, device: None)
+        self.device.characters.install(package.build(good_files(), manifest()))
         # The tracking, as the installer leaves it (stand-ins: the device only serves them).
         folder = os.path.join(self.dir.name, "models", "mocap")
         os.makedirs(folder)
@@ -320,6 +322,7 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
 
         info = await (await self.client.get("/r/%s/info" % code.lower())).json()
         self.assertEqual(info["assets"], "ready")
+        self.assertEqual(info["character"], "Aria")
         self.assertEqual(info["layout"]["face_points"], list(mocap.FACE_POINTS))
         self.assertEqual(len(info["layout"]["pose_points"]), len(mocap.POSE))
 
@@ -388,6 +391,18 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 413)
         r = await self.client.post("/r/%s/motion" % code, json=payload(arm=1.0, turn=0.0), headers=H)
         self.assertFalse((await r.json())["can"], "this character has no arms to raise")
+
+    async def test_with_no_character_on_the_screen_it_says_so(self):
+        self.device.characters.delete("aria")
+        await self.login()
+        code = (await self.start())["code"]
+        answer = await (await self.client.post("/r/%s/motion" % code, json=payload(), headers=H)).json()
+        self.assertFalse(answer["played"])
+        self.assertNotIn({"gesture": motions.TRY}, self.stage.commands)
+        answer = await (await self.client.post("/r/%s/play" % code, json={}, headers=H)).json()
+        self.assertFalse(answer["played"])
+        r = await self.client.post("/r/%s/save" % code, json={"name": "kept anyway"}, headers=H)
+        self.assertEqual(r.status, 200, "it can still be kept")
 
     async def test_wrong_codes(self):
         r = await self.client.get("/r/ABCDEF/info")
