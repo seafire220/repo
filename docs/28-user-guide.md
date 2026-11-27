@@ -312,6 +312,71 @@ changed or removed under **Change or add a gesture**. A character without
 the body part a gesture uses most (arms, say) cannot make it; the phone
 tells you when that is so.
 
+### The live camera (optional)
+
+Normally your phone films with its own camera app. With the **live
+camera**, the recorder page uses the camera directly: you see yourself, it
+counts three and records while you watch, and it can make the character
+copy you live (below). It is off until you turn it on, because of one
+thing to know first:
+
+**Your phone will warn you the first time.** A phone's browser only lets a
+page use the camera live over a secure (HTTPS) connection. The device makes
+its own, but your phone does not know the device, so it says the connection
+is not private. That is expected for a device on your own network; nothing
+leaves your home. To continue, once on each phone:
+
+- **Android (Chrome):** tap *Advanced*, then *Proceed to 192.168.1.23
+  (unsafe)* (your device's address).
+- **iPhone (Safari):** tap *Show Details*, then *visit this website*, then
+  *Visit Website*.
+
+Only do this for your device's own address, as the settings page shows
+it, never for a website on the internet. To be sure the warning is about
+your device, compare the certificate's fingerprint the phone can show with
+the one on the settings page. Some work phones do not let you continue; use
+the camera app with those.
+
+To turn it on: **Animation** tab, open *Live camera*, tick **Use the live
+camera**. The QR code and link then start with `https://`. On the phone,
+press **Start the camera** (and allow the camera), then **Record a
+gesture** (it counts three; press **Stop** when done), or **Copy me on the
+screen**. *Or film with the camera app* is still there.
+
+### Copy me live
+
+The character copies your face as you move (your head, eyes, brows, smile
+and mouth, and with the live camera also your shoulders and arms), on its
+screen as it happens. Hold still for a second when it starts: that is your
+resting pose. Press **Recentre** if you sit differently later.
+
+- **With the live camera:** as above, press **Copy me on the screen** on
+  the phone. Press it again to stop.
+- **With a face-tracking app** on your phone (no warning involved):
+  - *VTube Studio* (iPhone): in its settings, first tab, turn on *3rd
+    Party PC Clients*. It shows your phone's address.
+  - *MeowFace* (Android, free): press *Start*. It shows your phone's
+    address.
+  - *iFacialMocap* (iPhone): its address is at the top.
+
+  On the **Animation** tab, under **Copy me live**, choose the app, type
+  the phone's address and press **Connect**. Keep the app open, on the same
+  Wi-Fi as the device.
+
+**Like a mirror** (on to begin with) makes the character copy you as your
+reflection does; turn it off and your right is its right. With an app, if
+it nods the wrong way, tick **Flip up and down**; if it turns the wrong
+way, change **Like a mirror**. Each app is a little different, and the
+device remembers your choices.
+
+While copying, the character makes no gestures of its own. When you stop,
+or the phone goes quiet for half a second, it carries on by itself.
+
+**Record a gesture** while it copies you: press it, make the gesture, press
+it again (at most 20 seconds). The gesture plays on the screen and opens
+in **Change or add a gesture** below: give it a name and what it means,
+then **Save**.
+
 ## Memory
 
 The character remembers each conversation as a whole, the lasting things

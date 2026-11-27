@@ -32,7 +32,8 @@ installing other software yourself.)
 TRADEMARKS
 
 Live2D and Cubism are trademarks or registered trademarks of Live2D Inc. Raspberry Pi is a trademark of
-Raspberry Pi Ltd. VTube Studio is a trademark of its developer, DenchiSoft. Python is
+Raspberry Pi Ltd. VTube Studio is a trademark of its developer, DenchiSoft; MeowFace and iFacialMocap
+belong to their developers. Python is
 a registered trademark of the Python Software Foundation. Linux is a registered trademark of Linus
 Torvalds. Claude is a trademark of Anthropic, PBC. OpenAI and ChatGPT are trademarks of OpenAI. Other
 names are trademarks of their owners. This device and its maker are not affiliated with, sponsored or

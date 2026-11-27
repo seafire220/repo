@@ -73,7 +73,7 @@ apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
     alsa-utils network-manager dnsmasq-base polkitd fonts-dejavu-core python3-qrcode avahi-daemon libnss-mdns \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
-    espeak-ng-data espeak-ng ca-certificates curl
+    espeak-ng-data espeak-ng ca-certificates curl openssl
 
 say "Creating the service user"
 if ! id companion >/dev/null 2>&1; then

@@ -51,6 +51,11 @@ DEFAULT_SETTINGS = {
     # Saying the character's name starts listening, as the button does; `phrase` "" means "hey" and
     # its name; `sensitivity` "low", "normal" or "high".
     "wake_word": {"on": False, "phrase": "", "sensitivity": "normal"},
+    # Moving the character live with a phone (docs/26-animation-director.md, "Live from a phone"). The live
+    # camera in a phone's browser needs the device's own HTTPS, which phones warn about once, so it is off
+    # unless the owner turns it on. A face-tracking app is reached at the phone's address. `mirror`: the
+    # character copies you as a reflection does; `flip`: an app's nods the other way up.
+    "live": {"camera": False, "app": "vts", "app_address": "", "mirror": True, "flip": False},
 }
 
 # The secret names the device accepts: one key per provider.
@@ -202,8 +207,13 @@ def _check_choices(changes):
             raise ValueError("%s.%s must be a number from %s to %s" % (group, name, low, high))
 
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
-                        ("family_safe", "on"), ("wake_word", "on")):
+                        ("family_safe", "on"), ("wake_word", "on"), ("live", "camera"), ("live", "mirror"),
+                        ("live", "flip")):
         switch(group, name)
+    choice("live", "app", ("vts", "ifm"))
+    address = (changes.get("live") or {}).get("app_address")
+    if address is not None and (not isinstance(address, str) or len(address) > 64):
+        raise ValueError("live.app_address must be the phone's address")
     choice("captions", "size", ("normal", "large"))
     choice("screen", "how", ("off", "dim"))
     choice("wake_word", "sensitivity", ("low", "normal", "high"))

@@ -107,45 +107,51 @@ def frames_from_payload(body):
     if not isinstance(body, dict):
         raise ValueError("send the landmarks as an object")
     fps = _number(body.get("fps"), FPS_RANGE[0], FPS_RANGE[1], "fps")
-    width = _number(body.get("width"), 16, 8192, "width")
-    height = _number(body.get("height"), 16, 8192, "height")
+    width, height = picture_size(body)
     raw = body.get("frames")
     if not isinstance(raw, list) or len(raw) < 2:
         raise ValueError("send the landmarks of at least two frames")
     if len(raw) > MAX_FRAMES or (len(raw) - 1) / fps > MAX_SECONDS + 0.5:
         raise ValueError("a gesture can be %d seconds at most" % MAX_SECONDS)
-    joints = list(mocap.POSE)
-    frames = []
-    for i, f in enumerate(raw):
-        if not isinstance(f, dict):
-            raise ValueError("frame %d is not an object" % i)
-        face = blend = pose = None
-        if f.get("face") is not None:
-            points = f["face"]
-            if not isinstance(points, list) or len(points) != len(mocap.FACE_POINTS):
-                raise ValueError("frame %d: the face needs %d points" % (i, len(mocap.FACE_POINTS)))
-            face = {}
-            for index, p in zip(mocap.FACE_POINTS, points):
-                if not isinstance(p, list) or len(p) != 2:
-                    raise ValueError("frame %d: a face point is [x, y]" % i)
-                face[index] = (_number(p[0], -2, 3, "x") * width, _number(p[1], -2, 3, "y") * height)
-        if f.get("blend") is not None:
-            scores = f["blend"]
-            if not isinstance(scores, list) or len(scores) != len(mocap.BLENDSHAPES):
-                raise ValueError("frame %d: the face needs %d expression scores" % (i, len(mocap.BLENDSHAPES)))
-            blend = {name: _number(v, 0, 1, "an expression score") for name, v in zip(mocap.BLENDSHAPES, scores)}
-        if f.get("pose") is not None:
-            points = f["pose"]
-            if not isinstance(points, list) or len(points) != len(joints):
-                raise ValueError("frame %d: the body needs %d points" % (i, len(joints)))
-            pose = {}
-            for name, p in zip(joints, points):
-                if not isinstance(p, list) or len(p) != 4:
-                    raise ValueError("frame %d: a body point is [x, y, z, visibility]" % i)
-                pose[name] = (_number(p[0], -2, 3, "x") * width, _number(p[1], -2, 3, "y") * height,
-                              _number(p[2], -5, 5, "z") * width, _number(p[3], 0, 1, "visibility"))
-        frames.append(mocap.frame_controls(face, blend, pose))
-    return frames, fps
+    return [frame_controls(f, width, height, i) for i, f in enumerate(raw)], fps
+
+
+def picture_size(body):
+    """The picture's width and height from what a phone sends, checked."""
+    return _number(body.get("width"), 16, 8192, "width"), _number(body.get("height"), 16, 8192, "height")
+
+
+def frame_controls(f, width, height, i=0):
+    """One frame of what a phone sends (as in frames_from_payload), checked, as the stage's controls."""
+    if not isinstance(f, dict):
+        raise ValueError("frame %d is not an object" % i)
+    face = blend = pose = None
+    if f.get("face") is not None:
+        points = f["face"]
+        if not isinstance(points, list) or len(points) != len(mocap.FACE_POINTS):
+            raise ValueError("frame %d: the face needs %d points" % (i, len(mocap.FACE_POINTS)))
+        face = {}
+        for index, p in zip(mocap.FACE_POINTS, points):
+            if not isinstance(p, list) or len(p) != 2:
+                raise ValueError("frame %d: a face point is [x, y]" % i)
+            face[index] = (_number(p[0], -2, 3, "x") * width, _number(p[1], -2, 3, "y") * height)
+    if f.get("blend") is not None:
+        scores = f["blend"]
+        if not isinstance(scores, list) or len(scores) != len(mocap.BLENDSHAPES):
+            raise ValueError("frame %d: the face needs %d expression scores" % (i, len(mocap.BLENDSHAPES)))
+        blend = {name: _number(v, 0, 1, "an expression score") for name, v in zip(mocap.BLENDSHAPES, scores)}
+    if f.get("pose") is not None:
+        joints = list(mocap.POSE)
+        points = f["pose"]
+        if not isinstance(points, list) or len(points) != len(joints):
+            raise ValueError("frame %d: the body needs %d points" % (i, len(joints)))
+        pose = {}
+        for name, p in zip(joints, points):
+            if not isinstance(p, list) or len(p) != 4:
+                raise ValueError("frame %d: a body point is [x, y, z, visibility]" % i)
+            pose[name] = (_number(p[0], -2, 3, "x") * width, _number(p[1], -2, 3, "y") * height,
+                          _number(p[2], -5, 5, "z") * width, _number(p[3], 0, 1, "visibility"))
+    return mocap.frame_controls(face, blend, pose)
 
 
 def fit_keys(tracks, limit=motions.MAX_KEYS):

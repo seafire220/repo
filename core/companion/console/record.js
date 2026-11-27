@@ -1,14 +1,18 @@
-// Recording a gesture with a phone's camera (core/companion/phone_record.py).
+// Recording a gesture with a phone's camera (core/companion/phone_record.py), and copying the person live
+// (live_motion.py).
 //
-// The phone films the gesture with its own camera app (a page on the home network may not use the camera
-// directly, but it may ask for a video), finds the face and body in each frame with MediaPipe for the web,
-// which the device serves, and sends only those points to the device. The device makes them into a gesture
-// and plays it on its screen.
+// Over the home network's plain address, the phone films the gesture with its own camera app (a page there
+// may not use the camera directly, but it may ask for a video). Over the device's own HTTPS, when the owner
+// turns the live camera on, the page uses the camera live: it records a gesture while you watch yourself, or
+// streams your movement for the character to copy. Either way the phone finds the face and body with
+// MediaPipe for the web, which the device serves, and sends only those points to the device.
 
 const $ = (id) => document.getElementById(id);
 const say = (el, value) => { el.textContent = value == null ? "" : String(value); };
-const STEPS = ["ask-code", "film", "trim", "read", "result", "kept"];
+const STEPS = ["ask-code", "live", "film", "trim", "read", "result", "kept"];
 const FPS = 12;                     // frames read a second: enough for a gesture, quick on a phone
+const LIVE_FPS = 20;                // frames read a second from the live camera
+const LIVE = window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
 const code = (location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/?$/) || [])[1] || "";
 let info = null;                    // what the device said about this link
@@ -18,6 +22,7 @@ let readerLoading = null;
 let clock = 0;                      // MediaPipe wants its frames' times to keep going up
 let stopped = false;
 let mirror = false;
+let from = "film";                  // where filming again goes back to: the camera app or the live camera
 
 function show(step) {
   for (const s of STEPS) $(s).hidden = s !== step;
@@ -65,7 +70,9 @@ async function start() {
   if (info.character) say($("for"), "for " + info.character);
   for (const el of document.querySelectorAll(".max-seconds")) say(el, info.max_seconds);
   countdown(info.expires_in);
-  show("film");
+  from = LIVE ? "live" : "film";
+  $("to-live").hidden = !LIVE;
+  show(from);
   prepareReader();
 }
 
@@ -284,7 +291,7 @@ async function readMovement() {
   if (found < count / 2) {
     problem("You were found in only " + Math.round(100 * found / count) + "% of the video. Film it again facing " +
       "the camera, with your head and shoulders in view, in good light.");
-    show("film");
+    show(from);
     return;
   }
   await send({ fps: FPS, width: video.videoWidth, height: video.videoHeight, frames });
@@ -298,7 +305,7 @@ async function send(payload) {
     answer = await call("POST", "/r/" + code + "/motion", Object.assign(payload, { mirror }));
   } catch (err) {
     problem(err.message);
-    show(err.status === 404 || err.status === 429 ? "" : "film");     // a link that has ended: nothing more to do
+    show(err.status === 404 || err.status === 429 ? "" : from);       // a link that has ended: nothing more to do
     return;
   }
   problem("");
@@ -357,8 +364,154 @@ function renamed() {
   $("btn-keep").hidden = false;
 }
 
+// ----- the live camera (over the device's own HTTPS): record while you watch, or be copied live
+const cam = { stream: null, video: null, models: null, last: 0, recording: null, socket: null, lock: null };
+
+function liveNote(text) { say($("cam-note"), text); }
+
+async function startCamera() {
+  problem("");
+  $("btn-cam").disabled = true;
+  try {
+    cam.stream = await navigator.mediaDevices.getUserMedia(
+      { video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+  } catch (err) {
+    $("btn-cam").disabled = false;
+    problem("The camera did not start (" + err.message + "). Allow this page to use the camera, or film with " +
+      "the camera app instead.");
+    return;
+  }
+  cam.video = $("cam");
+  cam.video.srcObject = cam.stream;
+  await cam.video.play().catch(() => {});
+  liveNote("Getting the movement reader ready…");
+  try {
+    cam.models = await prepareReader();
+  } catch (err) {
+    return;                                    // prepareReader said why
+  }
+  try { cam.lock = await navigator.wakeLock.request("screen"); } catch (err) { /* the screen may dim; that is all */ }
+  $("btn-cam").hidden = true;
+  $("cam-tools").hidden = false;
+  liveNote("Face the camera with your head and shoulders in view.");
+  requestAnimationFrame(liveStep);
+}
+
+function liveStep(now) {
+  if (!cam.stream) return;
+  requestAnimationFrame(liveStep);
+  if ($("live").hidden || now - cam.last < 1000 / LIVE_FPS || cam.video.readyState < 2) return;
+  cam.last = now;
+  clock = Math.max(clock + 1, Math.round(now));
+  let face, pose;
+  try {
+    face = cam.models.face.detectForVideo(cam.video, clock);
+    pose = cam.models.pose.detectForVideo(cam.video, clock);
+  } catch (err) {
+    return;
+  }
+  const frame = frameFrom(face, pose);
+  drawSeen($("cam-seen"), cam.video, face, pose);
+  if (cam.recording) {
+    cam.recording.frames.push([now, frame]);
+    const seconds = (now - cam.recording.began) / 1000;
+    say($("btn-live-rec"), "Stop (" + seconds.toFixed(0) + " s)");
+    if (seconds >= info.max_seconds) stopLiveRecording();
+  }
+  if (cam.socket && cam.socket.readyState === 1 && cam.socket.bufferedAmount < 65536) {
+    cam.socket.send(JSON.stringify({ frame, width: cam.video.videoWidth, height: cam.video.videoHeight }));
+  }
+}
+
+// Record: three, two, one, then up to the longest gesture; the frames go to the device as a recording does.
+async function toggleLiveRecording() {
+  if (cam.recording) { stopLiveRecording(); return; }
+  if (cam.counting) return;
+  cam.counting = true;
+  for (const n of [3, 2, 1]) {
+    say($("cam-count"), n);
+    $("cam-count").hidden = false;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  $("cam-count").hidden = true;
+  cam.counting = false;
+  cam.recording = { began: performance.now(), frames: [] };
+  $("btn-live-rec").classList.add("danger");
+}
+
+function steady(frames, fps) {
+  const t0 = frames[0][0], t1 = frames[frames.length - 1][0];
+  const out = [];
+  let j = 0;
+  for (let i = 0; i <= Math.floor((t1 - t0) / 1000 * fps); i++) {
+    const t = t0 + i * 1000 / fps;
+    while (j + 1 < frames.length && Math.abs(frames[j + 1][0] - t) <= Math.abs(frames[j][0] - t)) j++;
+    out.push(frames[j][1]);
+  }
+  return out;
+}
+
+async function stopLiveRecording() {
+  const recording = cam.recording;
+  cam.recording = null;
+  $("btn-live-rec").classList.remove("danger");
+  say($("btn-live-rec"), "Record a gesture");
+  if (!recording || recording.frames.length < 2) return;
+  stopCopying();                               // the recording plays on the screen next, not you
+  from = "live";
+  const frames = steady(recording.frames, FPS);
+  const found = frames.filter((f) => f.face || f.pose).length;
+  if (found < frames.length / 2) {
+    problem("You were in view for only " + Math.round(100 * found / frames.length) + "% of it. Face the camera, " +
+      "with your head and shoulders in view, in good light.");
+    return;
+  }
+  liveNote("Sending it to the device…");
+  await send({ fps: FPS, width: cam.video.videoWidth, height: cam.video.videoHeight, frames });
+}
+
+// Copy me: the movement goes to the device as it happens, and the character copies it.
+function toggleCopying() {
+  if (cam.socket) { stopCopying(); return; }
+  const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/r/" + code + "/live");
+  cam.socket = socket;
+  say($("btn-copy"), "Connecting…");
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ mirror: $("live-mirror").checked }));
+    say($("btn-copy"), "Stop copying me");
+    $("btn-copy").classList.add("on");
+  };
+  socket.onmessage = (m) => {
+    let s;
+    try { s = JSON.parse(m.data); } catch (err) { return; }
+    liveNote(!s.on ? "" : s.calibrating ? "Hold still for a moment, facing the camera…" :
+      !s.face ? "It cannot see you: face the camera." : "The character is copying you (" + s.fps + " times a second).");
+  };
+  socket.onclose = () => {
+    if (cam.socket === socket) cam.socket = null;
+    say($("btn-copy"), "Copy me on the screen");
+    $("btn-copy").classList.remove("on");
+  };
+}
+
+function stopCopying() {
+  if (cam.socket) cam.socket.close();
+  cam.socket = null;
+}
+
 // ----- wiring
-for (const id of ["camera", "pick"]) $(id).addEventListener("change", (e) => chosen(e.target));
+$("btn-cam").addEventListener("click", startCamera);
+$("btn-live-rec").addEventListener("click", toggleLiveRecording);
+$("btn-copy").addEventListener("click", toggleCopying);
+$("live-mirror").addEventListener("change", (e) => {
+  if (cam.socket && cam.socket.readyState === 1) cam.socket.send(JSON.stringify({ mirror: e.target.checked }));
+});
+$("btn-live-recentre").addEventListener("click", () => {
+  if (cam.socket && cam.socket.readyState === 1) cam.socket.send(JSON.stringify({ recentre: true }));
+});
+$("to-file").addEventListener("click", (e) => { e.preventDefault(); stopCopying(); from = "film"; show("film"); });
+$("to-live").addEventListener("click", (e) => { e.preventDefault(); from = "live"; show("live"); });
+for (const id of ["camera", "pick"]) $(id).addEventListener("change", (e) => { from = "film"; chosen(e.target); });
 $("start").addEventListener("input", () => trimmed("start"));
 $("end").addEventListener("input", () => trimmed("end"));
 $("btn-read").addEventListener("click", () => readMovement().catch((err) => { problem(err.message); show("film"); }));
@@ -366,7 +519,7 @@ $("btn-trim-back").addEventListener("click", () => show("film"));
 $("btn-stop").addEventListener("click", () => { stopped = true; });
 $("btn-again").addEventListener("click", playAgain);
 $("mirror").addEventListener("change", (e) => { mirror = e.target.checked; playAgain(); });
-$("btn-refilm").addEventListener("click", () => { problem(""); show("film"); });
+$("btn-refilm").addEventListener("click", () => { problem(""); show(from); });
 $("keep-form").addEventListener("submit", (e) => { e.preventDefault(); keep(false); });
 $("btn-replace").addEventListener("click", () => { renamed(); keep(true); });
 $("btn-rename").addEventListener("click", () => { renamed(); $("name").focus(); });
@@ -377,7 +530,7 @@ for (const r of document.querySelectorAll("input[name=kind]")) {
 $("btn-another").addEventListener("click", () => {
   $("name").value = ""; $("words").value = ""; $("mirror").checked = false; mirror = false;
   problem("");
-  show("film");
+  show(from);
 });
 
 start();

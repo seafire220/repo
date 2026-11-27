@@ -404,6 +404,64 @@ The owner can record a gesture with a phone, with no app and no computer
 The video stays on the phone. The device receives only the points, so a
 phone recording costs it no video decoding or model running at all.
 
+## Live from a phone ("Copy me", and the live camera)
+
+The character can copy a person as they move, from either of two sources,
+one at a time (the newest takes over):
+
+- **The live camera in the phone's browser.** A page may use the camera
+  live (`getUserMedia`) only in a secure context, so this needs the
+  device's own HTTPS (`core/companion/tls.py`). It is off until the owner
+  turns it on (settings `live.camera`), since phones warn about a
+  certificate they do not know; the settings page explains the warning and
+  how to continue on Android and iPhone *before* anyone meets it, and shows
+  the certificate's SHA-256 fingerprint to compare. The certificate is made
+  on the device with `openssl` the first time: self-signed, P-256 and
+  SHA-256, the device's names and Wi-Fi address in subjectAltName, for
+  server authentication, 825 days (the most phones accept), made again a
+  month before it runs out; the key is readable by the service alone, and
+  backups leave it out. The HTTPS listener (port 443 on the device,
+  `--tls-port`) serves the phone's recorder and its files, the licences,
+  and nothing else: the settings page and its API are not on it.
+  The recorder page, given a secure context, starts the camera on a tap,
+  reads it with MediaPipe about 20 times a second, and draws what it sees
+  (mirrored, as a selfie view). *Record a gesture* counts three and records
+  the frames with their times, then resamples them to 12 a second and
+  sends them as a filmed recording is sent (`/r/<code>/motion`); *Copy me*
+  opens a WebSocket (`/r/<code>/live`, same origin only, the link's code
+  required) and sends each frame's points; the page keeps the phone's
+  screen awake meanwhile.
+- **A face-tracking app on the phone** (`core/companion/phone_apps.py`):
+  VTube Studio (iPhone) or MeowFace (Android), which speak VTube Studio's
+  protocol, or iFacialMocap (iPhone). The device asks the phone at the
+  address the owner typed (on the home network only) and listens for its
+  frames, from that address only: VTube Studio's are JSON (head rotation in
+  degrees, the 52 ARKit blendshapes 0 to 1), asked for again every half
+  second; iFacialMocap's are text (blendshapes 0 to 100, head angles in
+  degrees), on UDP port 49983 both ways. The blendshapes become the face
+  as a video's do (`mocap.face_controls`); the head's angles become its
+  turn, nod and tilt (30 degrees of turn or nod, 20 of tilt, is 1).
+  Neither app documents which way its angles go: they follow Apple's
+  ARKit, and the owner can mirror and flip them.
+
+`core/companion/live_motion.py` turns either source's frames into the
+stage's controls: measured from the person's resting pose (the median of
+their first second; *Recentre* takes it again), mirrored like a
+reflection unless the owner turns that off (`live.mirror`), flipped up and
+down if asked (`live.flip`, apps only), smoothed (1-euro), and sent to the
+stage at most 30 times a second as `{"live": {...}}` (`stage/src/live.rs`).
+While the character talks its mouth is its own. *Record a gesture*
+(settings page, for an app) keeps the shown values, up to 20 seconds,
+resamples them to 15 a second and makes a clip exactly as a video is made
+into one; it opens in the gesture editor to be named and saved.
+
+In the stage, live values take over the controls they name, on the pose
+before it is mapped to the character's parameters, so they work for 2D
+puppets and 3D avatars alike; the stage follows smoothly between updates
+(a twentieth of a second), starts no gestures or idle actions of its own
+meanwhile, and eases the controls back to the character when updates stop
+for half a second or `{"live": null}` comes.
+
 ## When tags are missing or wrong
 
 - **Talking never depends on tags.** The mouth, the beats and the mood's
@@ -461,6 +519,25 @@ phone recording costs it no video decoding or model running at all.
   the same name after confirming, the code typed in small letters, a
   stopped link refused; the QR code decoded back to the link at the size
   the page shows it.
+- Live from a phone (`core/tests/test_live.py`, 20 tests; stage `live.rs`,
+  4 tests, and its parser): the certificate (to phones' rules, kept, made
+  again in its last month, nothing left behind), the resting pose, mirror,
+  at most 30 updates a second, the mouth left to speech, one source at a
+  time, recording (uneven frames resampled, too short refused, stopped at
+  20 seconds and returned once), both apps' packets (VTube Studio's;
+  iFacialMocap's own example, stray characters and all), their angles,
+  addresses on the home network only, both apps asked and answered by a
+  stand-in phone, others ignored; the routes (owner only, HTTPS serving the
+  recorder alone and gone when turned off, the WebSocket from its own page
+  only). On the real stage: live values turn the head, and the picture is
+  back to rest, to the pixel, after `null` and after updates stop
+  (`stage/tools/visual_test.py`). End to end in headless Chromium
+  (`core/tests/live_test.cjs`, with `tests/fake_phone_app.py`, a video as
+  the phone's camera): the warning explained first, a phone refused by the
+  certificate until it accepts it, then the live camera, *Copy me* (3 to 4
+  frames a second on this machine's software graphics), a live recording
+  played and kept; the stand-in app copied 30 times a second, a recording
+  from it opened in the editor and saved; turned off, the HTTPS is gone.
 
 ## What it cannot do
 
@@ -484,6 +561,11 @@ phone recording costs it no video decoding or model running at all.
   an emulated phone (Chromium as a Pixel 7, software graphics), not yet on
   real iPhones and Android phones; their camera apps, video formats and
   graphics drivers vary.
+- Copying from VTube Studio, MeowFace and iFacialMocap was checked against
+  their published protocols and a stand-in, not real phones: which way
+  each app's angles go is a guess from ARKit until it is (the owner can
+  mirror and flip). How many frames a second a real phone's browser reads
+  live is not measured yet.
 
 ## How it was built
 

@@ -384,6 +384,57 @@
       </div>
     </div>
 
+    <details id="live-camera-box">
+      <summary>Live camera: watch yourself while you film, and let the character copy you live</summary>
+      <p>Without it, your phone films with its camera app. With it, the recorder page uses the camera live:
+        you see yourself, it counts three and records, and it can make the character copy you as you move.</p>
+      <p><b>Your phone will show a warning the first time.</b> A phone's browser lets a page use the camera live
+        only over a secure (HTTPS) connection. The device makes one itself, but phones don't know the device, so
+        they say the connection isn't private. That is expected for a device on your own network: nothing leaves
+        your home. To continue, once on each phone:</p>
+      <ul>
+        <li><b>Android (Chrome):</b> tap <i>Advanced</i>, then <i>Proceed to <span class="live-host">the
+          device's address</span> (unsafe)</i>.</li>
+        <li><b>iPhone (Safari):</b> tap <i>Show Details</i>, then <i>visit this website</i>, then <i>Visit
+          Website</i>.</li>
+      </ul>
+      <p>Only do this for your device's own address (<b class="live-host">shown in the link</b>), never for a website
+        on the internet. If a phone refuses (some work phones do), film with the camera app instead.</p>
+      <p class="muted" id="live-fingerprint" hidden></p>
+      <p><label class="inline"><input type="checkbox" id="live-camera"> Use the live camera</label>
+        <span id="live-camera-msg" class="muted"></span></p>
+    </details>
+
+    <h2>Copy me live</h2>
+    <p class="muted">The character copies your face as you move: your head, eyes, brows, smile and mouth (and, with
+      the live camera, your shoulders and arms). It is on the screen as it happens, and you can record a gesture
+      from it. Your phone does the tracking; only the movement comes to the device.</p>
+    <h3>With the live camera</h3>
+    <p class="muted">Turn on the live camera above, open the recorder link on your phone, start the camera, and press
+      <i>Copy me on the screen</i>.</p>
+    <h3>With a face-tracking app</h3>
+    <p class="muted"><b>VTube Studio</b> (iPhone; in its settings, first tab, turn on <i>3rd Party PC Clients</i>) or
+      <b>MeowFace</b> (Android, free; press <i>Start</i>): each shows your phone's address. <b>iFacialMocap</b>
+      (iPhone) shows it at the top. Keep the app open, with your phone on the same Wi-Fi as the device.</p>
+    <div class="row">
+      <label class="inline">App <select id="app-kind">
+        <option value="vts">VTube Studio or MeowFace</option>
+        <option value="ifm">iFacialMocap</option></select></label>
+      <label class="inline">Your phone's address <input id="app-address" size="16" placeholder="192.168.1.40"
+        inputmode="decimal" autocomplete="off"></label>
+      <button id="btn-app-connect">Connect</button>
+      <button id="btn-app-stop" class="secondary" hidden>Disconnect</button>
+    </div>
+    <p id="live-status"></p>
+    <div id="live-tools" hidden>
+      <p><label class="inline"><input type="checkbox" id="live-mirror"> Like a mirror (it copies you as your
+        reflection does; off: your right is its right)</label>
+        <label class="inline" id="live-flip-row"><input type="checkbox" id="live-flip"> Flip up and down (if it nods
+          the wrong way)</label></p>
+      <p><button id="btn-live-recentre" class="secondary">Recentre</button>
+        <button id="btn-live-record">Record a gesture</button> <span id="live-record-msg" class="muted"></span></p>
+    </div>
+
     <h2>Change or add a gesture</h2>
     <p class="muted">Each gesture and idle action is a few tracks: a control (a head nod, the left arm, a smile) and
       its value over time, from -1 to 1, starting and ending at 0. Try a change on the device's screen before saving

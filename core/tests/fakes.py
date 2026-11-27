@@ -113,7 +113,8 @@ class FakeStage:
     async def describe_library(self, timeout=3.0):
         clips = {g: {"kind": "gesture", "needs": [], "tracks": {"head_pitch": [[0, 0], [0.3, -0.4], [0.6, 0]]},
                      "origin": "built in", "can": True} for g in self.gestures}
-        return {"clips": clips, "controls": ["head_pitch", "head_roll"]}
+        from companion.motions import CONTROLS
+        return {"clips": clips, "controls": list(CONTROLS)}
 
     def clock(self, hour):
         self.commands.append({"clock": round(hour, 3)})

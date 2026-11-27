@@ -83,8 +83,10 @@ resell them.
   Raspberry Pi OS, because it is changed. Do not put "Raspberry Pi" in the product's name or use its logo
   without Raspberry Pi Ltd's approval (its "Powered by Raspberry Pi" programme).
 - **Others named on the settings page or in the guides** (Anthropic and Claude, OpenAI and ChatGPT,
-  ElevenLabs, Tavily, VTube Studio, VRoid Studio, VRM, Python, Windows, macOS, Linux, NVIDIA, PyTorch):
-  only to say what the product works with. The notices list the owners.
+  ElevenLabs, Tavily, VTube Studio, MeowFace, iFacialMocap, VRoid Studio, VRM, Python, Windows, macOS,
+  Linux, NVIDIA, PyTorch): only to say what the product works with. The notices list the owners. The
+  device speaks the face-tracking apps' published protocols (their developers describe them for other
+  programs to use); none of their code is in it.
 - **SyBran CODE27.** The README calls the product a lower-cost alternative to it. On a campaign page,
   comparisons must be accurate and must not suggest any link with SyBran (Australian Consumer Law
   s 18); no SyBran names or pictures in branding.

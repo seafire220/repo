@@ -132,6 +132,7 @@ function onEvent(e) {
     return;
   }
   if (e.kind === "recording") { showRecording(e); return; }
+  if (e.kind === "live") { showLive(e); return; }
   if (e.kind === "state") text($("home-state"), e.state);
   else if (e.kind === "heard") addLog("You:", e.text);
   else if (e.kind === "replied" && e.text) addLog("Character:", e.text + (e.interrupted ? " (interrupted)" : ""));
@@ -390,8 +391,15 @@ $("btn-ed-try").addEventListener("click", async () => {
   } catch (err) { text($("ed-msg"), err.message); }
 });
 $("btn-ed-save").addEventListener("click", async () => {
+  // A new gesture is saved under the name in its box ("App test" becomes app_test).
+  const name = !editing.isNew ? editing.name :
+    $("ed-name").value.trim().toLowerCase().replace(/[^a-z]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+  if (!name) { text($("ed-msg"), "Give it a name first, such as little_dance."); return; }
+  if (editing.isNew && library.clips[name] && !confirm("There is already a gesture called " + name.replace(/_/g, " ") +
+    ". Replace it with this one?")) return;
   try {
-    await api("PUT", "/api/motions/" + editing.name, editedClip());
+    await api("PUT", "/api/motions/" + name, editedClip());
+    editing.name = name;
     editing.isNew = false;
     await loadEditor();
     text($("ed-msg"), "Saved on this device.");
@@ -460,7 +468,91 @@ $("btn-rec-end").addEventListener("click", async () => {
   try { await api("DELETE", "/api/record"); showRecording({ active: false }); } catch (err) { text($("rec-msg"), err.message); }
 });
 
+// ----- "Copy me" live, and the live camera (live_motion.py, phone_apps.py, tls.py)
+let liveState = null;
+
+async function loadLive() {
+  showLive(await api("GET", "/api/live"));
+}
+
+function liveSaid(s) {
+  const l = s.live;
+  if (!l.on) return "";
+  const from = l.kind === "app" ? l.label : "the phone's live camera";
+  if (!l.fps) return "Connected to " + from + ", but nothing is coming from it yet. Check that it is open, on the same " +
+    "Wi-Fi as the device" + (l.kind === "app" ? ", and showing this address: " + s.app.address : "") + ".";
+  if (l.calibrating) return "Copying " + from + ": hold still for a moment, facing the phone…";
+  if (!l.face) return "Copying " + from + ": it cannot see your face.";
+  return "The character is copying you, from " + from + " (" + l.fps + " times a second).";
+}
+
+function showLive(s) {
+  const wasRecording = liveState && liveState.live.recording != null;
+  liveState = s;
+  // A recording that stopped by itself at the longest a gesture can be: fetch it for the editor.
+  if (wasRecording && s.live.recording == null && s.live.recorded) setTimeout(finishLiveRecording, 0);
+  $("live-camera").checked = !!s.camera;
+  $("live-camera").disabled = !s.https.available && !s.camera;
+  text($("live-camera-msg"), !s.https.available ? "This device cannot offer it." : s.https.error ? s.https.error :
+    s.https.on ? "On: the recorder's link now starts with https." : "");
+  $("live-fingerprint").hidden = !s.https.fingerprint;
+  text($("live-fingerprint"), "To check a warning is about this device: its certificate's SHA-256 fingerprint begins " +
+    (s.https.fingerprint || "").slice(0, 23) + ".");
+  const host = recording && recording.links ? new URL(recording.links[0]).hostname : location.hostname;  // as the warning names it
+  for (const el of document.querySelectorAll(".live-host")) text(el, host);
+  if (document.activeElement !== $("app-address") && !$("app-address").value) $("app-address").value = s.app.address || "";
+  if (!s.app.connected && document.activeElement !== $("app-kind")) $("app-kind").value = s.app.app;
+  $("btn-app-stop").hidden = !s.app.connected;
+  text($("btn-app-connect"), s.app.connected ? "Connect again" : "Connect");
+  text($("live-status"), s.app.error || liveSaid(s));
+  $("live-tools").hidden = !s.live.on;
+  $("live-mirror").checked = !!s.live.mirror;
+  $("live-flip-row").hidden = s.live.kind !== "app";
+  $("live-flip").checked = !!s.live.flip;
+  const r = s.live.recording;
+  text($("btn-live-record"), r == null ? "Record a gesture" : "Stop recording (" + Math.round(r) + " s)");
+  $("btn-live-record").classList.toggle("danger", r != null);
+}
+
+async function liveCall(method, path, body, where) {
+  try { showLive(await api(method, path, body)); if (!where) text($("live-record-msg"), ""); }
+  catch (err) { text(where || $("live-status"), err.message); }
+}
+
+$("live-camera").addEventListener("change", (e) => {
+  text($("live-camera-msg"), e.target.checked ? "Starting…" : "");
+  liveCall("PUT", "/api/live", { camera: e.target.checked }, $("live-camera-msg"))
+    .then(() => { if (recording) startRecording(); });          // a link for the other kind of connection
+});
+$("btn-app-connect").addEventListener("click", () =>
+  liveCall("POST", "/api/live/app", { app: $("app-kind").value, address: $("app-address").value.trim() }));
+$("btn-app-stop").addEventListener("click", () => liveCall("DELETE", "/api/live/app"));
+$("live-mirror").addEventListener("change", (e) => liveCall("PUT", "/api/live", { mirror: e.target.checked }));
+$("live-flip").addEventListener("change", (e) => liveCall("PUT", "/api/live", { flip: e.target.checked }));
+$("btn-live-recentre").addEventListener("click", () => liveCall("POST", "/api/live/recentre"));
+$("btn-live-record").addEventListener("click", async () => {
+  const recordingNow = liveState && liveState.live.recording != null;
+  if (!recordingNow) return liveCall("POST", "/api/live/record", { action: "start" }, $("live-record-msg"));
+  finishLiveRecording();
+});
+
+async function finishLiveRecording() {
+  try {
+    const got = await api("POST", "/api/live/record", { action: "stop" });
+    await loadEditor();
+    editClip("my_gesture", true, got.entry);
+    text($("live-record-msg"), "Recorded: it " + got.moves.join(", ") + " (" + got.seconds.toFixed(1) + " s), playing on " +
+      "the screen. It is in the editor below: give it a name and what it means, then Save.");
+    $("ed-name").scrollIntoView({ behavior: "smooth", block: "center" });
+    loadLive().catch(() => {});
+  } catch (err) { text($("live-record-msg"), err.message); loadLive().catch(() => {}); }
+}
+setInterval(() => {
+  if (liveState && liveState.live.on && !$("animation").hidden) loadLive().catch(() => {});
+}, 2000);
+
 async function loadAnimation() {
+  loadLive().catch((e) => text($("live-status"), e.message));
   loadRecording().catch((e) => text($("rec-msg"), e.message));
   loadEditor().catch((e) => text($("ed-msg"), e.message));
   const a = await api("GET", "/api/animation");

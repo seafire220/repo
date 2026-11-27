@@ -21,7 +21,7 @@ import urllib.parse
 from aiohttp import web
 
 from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
-from . import mocap_assets, phone_record
+from . import live_motion, mocap_assets, phone_apps, phone_record, tls
 from . import memory as memory_module
 from .memory import when
 from . import backup as backup_module
@@ -39,6 +39,7 @@ OPEN_PATHS = {"/api/login", "/api/setup", "/api/hello", "/api/health"}
 # The page a phone records a gesture with (phone_record.py) may run MediaPipe's WebAssembly; nothing else may.
 RECORD_CSP = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; "
               "media-src 'self' blob:; style-src 'self' 'unsafe-inline'")
+PHONE_ONLY = web.AppKey("phone_only", bool)      # the device's own HTTPS (make_phone_app)
 
 
 def local_address(remote):
@@ -49,6 +50,16 @@ def local_address(remote):
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
+class _Stage:
+    """The stage as it is now (the device can replace its link)."""
+
+    def __init__(self, device):
+        self.device = device
+
+    def send(self, command):
+        return self.device.stage.send(command)
+
+
 class Console:
     def __init__(self, device):
         self.device = device
@@ -57,6 +68,15 @@ class Console:
         self.recorder = phone_record.Recorder()
         self.mocap_fetch = None             # fetching the phone's tracking, when the device does not have it
         self.mocap_error = ""
+        # "Copy me": the character moves as a person does, from a phone (live_motion.py).
+        self.live = live_motion.LiveMotion(_Stage(device), speaking=lambda: getattr(device, "state", "") == "speaking",
+                                           changed=self._live_changed)
+        self.app_link = None                # a face-tracking app on a phone (phone_apps.py), while connected
+        self.app_error = ""
+        self.tls_runner = None              # the device's own HTTPS for the live camera (tls.py), while on
+        self.tls_port = None
+        self.tls_cert = None
+        self.tls_error = ""
 
     # ----- middleware
     @web.middleware
@@ -64,6 +84,8 @@ class Console:
         if not local_address(request.remote):
             raise web.HTTPForbidden(text="this device only answers on its home network")
         path = request.path
+        if request.app.get(PHONE_ONLY) and not path.startswith(("/r", "/static/", "/licences")):
+            raise web.HTTPNotFound()                 # the device's own HTTPS serves the phone's recorder alone
         self.device.last_use = time.time()
         if path.startswith(("/api/", "/r/")):
             # (A phone recording a gesture needs no login: its link's one-time code stands for one.)
@@ -1132,11 +1154,16 @@ class Console:
 
     async def _phone_links(self, request):
         """The addresses a phone on the home network can open the device at: its Wi-Fi address first (the
-        settings page may be open over USB, which a phone cannot reach), then the one this page used."""
+        settings page may be open over USB, which a phone cannot reach), then the one this page used. Over
+        the device's own HTTPS when the live camera is on."""
         host = request.host or ""
         match = re.fullmatch(r"(\[[^\]]*\]|[^:]*)(?::(\d+))?", host)
         name, port = (match.group(1), match.group(2)) if match else (host, None)
+        scheme = "http"
         suffix = ":%s" % port if port and port != "80" else ""
+        if self.tls_runner is not None:
+            scheme = "https"
+            suffix = "" if self.tls_port == 443 else ":%d" % self.tls_port
         names = []
         wifi = getattr(self.device, "wifi", None)
         if wifi is not None:
@@ -1151,7 +1178,7 @@ class Console:
         if wifi is not None and "companion.local" not in names:
             names.append("companion.local")
         local = [n for n in names if n == "localhost" or n.startswith(("127.", "[::1]"))]
-        return ["http://%s%s" % (n, suffix) for n in [n for n in names if n not in local] + local]
+        return ["%s://%s%s" % (scheme, n, suffix) for n in [n for n in names if n not in local] + local]
 
     def _phone_session(self, request):
         try:
@@ -1226,7 +1253,10 @@ class Console:
     # The phone's side: no login, the code in the link.
     async def record_page(self, request):
         response = web.FileResponse(os.path.join(STATIC, "record.html"))
-        response.headers["Content-Security-Policy"] = RECORD_CSP
+        # Its own host for the live camera's WebSocket ('self' alone does not cover wss: in every browser).
+        host = request.host if re.fullmatch(r"[A-Za-z0-9.\-]+(:\d+)?|\[[0-9A-Fa-f:.%]+\](:\d+)?", request.host or "") else ""
+        connect = "; connect-src 'self' wss://%s ws://%s" % (host, host) if host else ""
+        response.headers["Content-Security-Policy"] = RECORD_CSP + connect
         return response
 
     async def record_info(self, request):
@@ -1311,6 +1341,225 @@ class Console:
         self._record_changed()
         return web.json_response({"ok": True, "name": name, "kind": kind, "replaced": origin})
 
+    # ----- "Copy me": the character moves as a person does, live (live_motion.py)
+    def _live_changed(self):
+        self.device.publish("live", self._live_status())
+
+    def _live_status(self):
+        settings = self.device.store.settings()["live"]
+        link = self.app_link
+        return {
+            "camera": settings["camera"],
+            "https": {"on": self.tls_runner is not None, "port": self.tls_port, "error": self.tls_error,
+                      "fingerprint": tls.fingerprint(self.tls_cert) if self.tls_cert else "",
+                      "available": getattr(self.device, "tls_port", None) is not None and tls.available()},
+            "app": {"connected": link is not None, "app": link.app if link else settings["app"],
+                    "address": link.address if link else settings["app_address"],
+                    "frames": link.frames if link else 0, "error": self.app_error,
+                    "port": phone_apps.IFM_PORT if (link.app if link else settings["app"]) == "ifm" else phone_apps.VTS_PORT},
+            "live": self.live.status(),
+        }
+
+    async def _start_tls(self):
+        """Serve the phone's recorder over the device's own HTTPS (for its live camera)."""
+        if self.tls_runner is not None:
+            return
+        port = getattr(self.device, "tls_port", None)
+        if port is None:
+            raise OSError("this device does not offer the live camera")
+        addresses = []
+        wifi = getattr(self.device, "wifi", None)
+        if wifi is not None:
+            try:
+                addresses.append(await wifi.address())
+            except Exception:  # noqa: BLE001 (the certificate names the device without it)
+                pass
+        folder = os.path.join(self.device.data_dir, "config", "tls")
+        cert, key, _ = await asyncio.get_running_loop().run_in_executor(None, tls.ensure, folder, addresses)
+        runner = web.AppRunner(make_phone_app(self), access_log=None)
+        await runner.setup()
+        try:
+            site = web.TCPSite(runner, getattr(self.device, "web_host", "0.0.0.0"), port,
+                               ssl_context=tls.server_context(cert, key))
+            await site.start()
+        except OSError:
+            await runner.cleanup()
+            raise
+        self.tls_runner, self.tls_port, self.tls_cert, self.tls_error = runner, runner.addresses[0][1], cert, ""
+
+    async def _stop_tls(self):
+        runner, self.tls_runner, self.tls_port = self.tls_runner, None, None
+        if runner is not None:
+            await runner.cleanup()
+
+    async def on_startup(self, app):
+        if self.device.store.settings()["live"]["camera"]:
+            try:
+                await self._start_tls()
+            except OSError as error:
+                self.tls_error = str(error)
+
+    async def on_cleanup(self, app):
+        await self._stop_app()
+        await self._stop_tls()
+
+    async def get_live(self, request):
+        return web.json_response(self._live_status())
+
+    async def put_live(self, request):
+        """The live camera on or off, and how the character copies (like a mirror; an app's nods flipped)."""
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send camera, mirror or flip")
+        changes = {k: body[k] for k in ("camera", "mirror", "flip") if k in body}
+        try:
+            self.device.store.update_settings({"live": changes})
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        if "mirror" in changes:
+            self.live.set_mirror(changes["mirror"])
+        if "flip" in changes:
+            self.live.set_flip(changes["flip"])
+        if changes.get("camera") is True:
+            try:
+                await self._start_tls()
+            except OSError as error:
+                self.tls_error = str(error)
+                self.device.store.update_settings({"live": {"camera": False}})
+                raise web.HTTPServiceUnavailable(text="the live camera could not start: %s" % error)
+        elif changes.get("camera") is False:
+            await self._stop_tls()
+        self._live_changed()
+        return web.json_response(self._live_status())
+
+    async def _stop_app(self):
+        link, self.app_link = self.app_link, None
+        if link is not None:
+            await link.stop()
+            self.live.end("app")
+
+    async def connect_app(self, request):
+        """Connect to a face-tracking app on the owner's phone, and copy its face."""
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send the app and the phone's address")
+        app = body.get("app", "vts")
+        try:
+            address = phone_apps.phone_address(body.get("address"))
+            if app not in phone_apps.APPS:
+                raise ValueError("the app is VTube Studio (or MeowFace) or iFacialMocap")
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        await self._stop_app()
+        settings = self.device.store.update_settings({"live": {"app": app, "app_address": address}})["live"]
+        link = phone_apps.AppLink(app, address, lambda controls: self.live.frame(controls, "app"),
+                                  local_port=getattr(self.device, "app_port", None),
+                                  phone_port=getattr(self.device, "phone_port", None))
+        try:
+            await link.start()
+        except OSError as error:
+            self.app_error = str(error)
+            raise web.HTTPServiceUnavailable(text=str(error))
+        self.app_link, self.app_error = link, ""
+        self.live.begin("app", phone_apps.APPS[app], mirror=settings["mirror"], flip=settings["flip"])
+        return web.json_response(self._live_status())
+
+    async def disconnect_app(self, request):
+        await self._stop_app()
+        return web.json_response(self._live_status())
+
+    async def live_recentre(self, request):
+        self.live.recentre()
+        return web.json_response(self._live_status())
+
+    async def live_record(self, request):
+        """Record what the character copies, up to 20 seconds, as a gesture for the editor."""
+        body = await request.json()
+        action = body.get("action") if isinstance(body, dict) else None
+        try:
+            if action == "start":
+                self.live.start_recording()
+                return web.json_response(self._live_status())
+            if action != "stop":
+                raise ValueError("start or stop")
+            tracks = self.live.stop_recording()
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        entry = phone_record.entry(tracks)
+        self._try_on_screen(motions.clean(motions.TRY, entry), character=True)
+        return web.json_response({"entry": entry, "moves": phone_record.describe(tracks),
+                                  "seconds": max(keys[-1][0] for keys in tracks.values()),
+                                  "can": self._can_make(entry)})
+
+    async def record_live(self, request):
+        """The phone's live camera, copied as it moves (a WebSocket from the recorder page)."""
+        session = self._phone_session(request)
+        origin = request.headers.get("Origin")
+        if origin and urllib.parse.urlsplit(origin).netloc != request.host:
+            raise web.HTTPForbidden(text="the live movement comes from the recorder's own page")
+        ws = web.WebSocketResponse(heartbeat=10.0, max_msg_size=64 * 1024)
+        await ws.prepare(request)
+        await self._stop_app()                       # one person copied at a time: the newest
+        self.live.begin("browser", "the phone's live camera", mirror=self.device.store.settings()["live"]["mirror"])
+        told = 0.0
+        try:
+            async for message in ws:
+                if message.type != web.WSMsgType.TEXT:
+                    continue
+                if self.recorder.current() is not session:
+                    break                            # the owner stopped the link
+                try:
+                    data = json.loads(message.data)
+                except ValueError:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                if "mirror" in data:
+                    self.live.set_mirror(bool(data["mirror"]))
+                    self.device.store.update_settings({"live": {"mirror": bool(data["mirror"])}})
+                if data.get("recentre"):
+                    self.live.recentre()
+                if "frame" in data:
+                    try:
+                        width, height = phone_record.picture_size(data)
+                        controls = phone_record.frame_controls(data["frame"], width, height)
+                    except ValueError:
+                        continue
+                    if not self.live.frame(controls, "browser"):
+                        break                        # something else is copied now
+                if time.monotonic() - told > 0.5:
+                    told = time.monotonic()
+                    await ws.send_json(self.live.status())
+        finally:
+            self.live.end("browser")
+        return ws
+
+
+def _phone_routes(r, console):
+    """The pages and requests of the phone's recorder (no login: the link's code stands for one)."""
+    r.add_get("/r", console.record_page)
+    r.add_get("/r/", console.record_page)
+    r.add_get("/r/assets/{name}", console.record_asset)
+    r.add_get("/r/{code}", console.record_page)
+    r.add_get("/r/{code}/info", console.record_info)
+    r.add_get("/r/{code}/live", console.record_live)
+    r.add_post("/r/{code}/motion", console.record_motion)
+    r.add_post("/r/{code}/play", console.record_play)
+    r.add_post("/r/{code}/save", console.record_save)
+
+
+def make_phone_app(console):
+    """What the device's own HTTPS serves, for a phone's live camera: the recorder, and nothing else (the
+    settings page stays on the home network's plain address)."""
+    app = web.Application(middlewares=[console.guard], client_max_size=phone_record.MAX_BODY + 64 * 1024)
+    app[PHONE_ONLY] = True
+    _phone_routes(app.router, console)
+    app.router.add_get("/licences", console.licences)
+    app.router.add_get("/licences/{name}.txt", console.licence)
+    if os.path.isdir(STATIC):
+        app.router.add_static("/static/", STATIC)
+    return app
+
 
 def make_app(device):
     console = Console(device)
@@ -1366,14 +1615,15 @@ def make_app(device):
     r.add_get("/api/record", console.get_recording)
     r.add_post("/api/record", console.start_recording)
     r.add_delete("/api/record", console.end_recording)
-    r.add_get("/r", console.record_page)
-    r.add_get("/r/", console.record_page)
-    r.add_get("/r/assets/{name}", console.record_asset)
-    r.add_get("/r/{code}", console.record_page)
-    r.add_get("/r/{code}/info", console.record_info)
-    r.add_post("/r/{code}/motion", console.record_motion)
-    r.add_post("/r/{code}/play", console.record_play)
-    r.add_post("/r/{code}/save", console.record_save)
+    _phone_routes(r, console)
+    r.add_get("/api/live", console.get_live)
+    r.add_put("/api/live", console.put_live)
+    r.add_post("/api/live/app", console.connect_app)
+    r.add_delete("/api/live/app", console.disconnect_app)
+    r.add_post("/api/live/recentre", console.live_recentre)
+    r.add_post("/api/live/record", console.live_record)
+    app.on_startup.append(console.on_startup)
+    app.on_cleanup.append(console.on_cleanup)
     r.add_post("/api/stage/preview", console.stage_preview)
     r.add_post("/api/cards/read", console.read_card)
     r.add_get("/api/memory/{cid}", console.get_memory)

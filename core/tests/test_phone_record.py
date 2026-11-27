@@ -315,7 +315,11 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
 
         page = await self.client.get("/r/" + code)
         self.assertEqual(page.status, 200)
-        self.assertEqual(page.headers["Content-Security-Policy"], RECORD_CSP)
+        policy = page.headers["Content-Security-Policy"]
+        self.assertTrue(policy.startswith(RECORD_CSP))
+        here = "%s:%d" % (page.url.host, page.url.port)
+        self.assertIn("connect-src 'self' wss://%s ws://%s" % (here, here), policy,
+                      "its own host only, for the live camera's WebSocket")
         self.assertIn("record.js", await page.text())
         self.assertNotIn("wasm-unsafe-eval", (await self.client.get("/")).headers["Content-Security-Policy"],
                          "only the recorder may run WebAssembly")

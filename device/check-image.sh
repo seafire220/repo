@@ -99,6 +99,8 @@ check "wake-word model shipped" model wake/bpe.model
 check "tracking for recording gestures with a phone shipped (MediaPipe, with its notice)" sh -c "{ test -s '$ROOT/opt/companion/models/mocap/vision_wasm_internal.wasm' && test -s '$ROOT/opt/companion/models/mocap/pose_landmarker_lite.task' && test -s '$ROOT/opt/companion/models/mocap/LICENSE'; } || { test -s '$DATA/models/mocap/vision_wasm_internal.wasm' && test -s '$DATA/models/mocap/pose_landmarker_lite.task' && test -s '$DATA/models/mocap/LICENSE'; }"
 check "the wake word can spell names (sentencepiece)" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sentencepiece"
 check "espeak-ng installed for the voice" test -x "$ROOT/usr/bin/espeak-ng"
+check "openssl installed (the live camera's own certificate, made when the owner turns it on)" test -x "$ROOT/usr/bin/openssl"
+check "no certificate made in advance (each device makes its own)" sh -c "! test -e '$DATA/config/tls/phone-key.pem'"
 check "data folder owned by the service user" sh -c "[ \"\$(stat -c %u '$DATA')\" = \"\$(grep '^companion:' '$ROOT/etc/passwd' | cut -d: -f3)\" ]"
 check "core service starts at boot" enabled multi-user.target companion-core.service
 check "character starts at boot" enabled graphical.target companion-stage.service

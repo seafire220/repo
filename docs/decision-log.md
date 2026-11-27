@@ -1014,3 +1014,30 @@ rejected. Settled entries are not reopened without new evidence.
   this through an update fetches them when the owner first asks for a link, since updates carry no models.
 - Later, if wanted: live puppeteering from a phone (needs HTTPS the phone trusts, or an app); recording on
   real phones of several makes, to check their camera apps' video formats and graphics drivers.
+
+## D-071 — Live from a phone: an opt-in live camera over the device's own HTTPS, and face-tracking apps
+
+- Date: 2026-11-27. Status: built; checked with an emulated phone and a stand-in app, not yet real phones.
+- Asked for by the owner, after learning how Visio does it: a live camera mode by the self-signed approach,
+  with the warning explained for people to click past, and a route through phone apps such as VTube Studio
+  or MeowFace. (Visio's desktop app serves its phone page over HTTPS with its own certificate and tells
+  people to tap past the warning; it also takes face tracking from those apps. Nothing of Visio is used.)
+- **The live camera is opt-in** (off by default), because every phone warns about a certificate it does not
+  know. The settings page explains the warning, why it is expected on a home network, and the exact taps on
+  Android and iPhone, before the owner turns it on, and warns never to do it for a website on the internet;
+  it shows the certificate's fingerprint to compare. The camera-app recording stays the default and needs no
+  warning.
+- **The device makes its own certificate** with `openssl`, to the rules phones apply to every server
+  certificate (P-256, SHA-256, names in subjectAltName, server authentication, at most 825 days), and
+  renews it a month before it runs out; the key stays in `config/tls`, readable by the service alone, out of
+  backups, removed by a factory reset. A real certificate per device (a domain, a service we run, and some
+  routers block it) is not worth it for this.
+- **The HTTPS serves the phone's recorder alone**, on 443: the settings page and its API stay on the plain
+  address, so turning the live camera on adds nothing an owner's other pages depend on.
+- **Face-tracking apps need no certificate**: the device speaks their published protocols (VTube Studio's,
+  which MeowFace also speaks; iFacialMocap's) over UDP on the home network, to and from the address the
+  owner typed only. Their angles' directions are not documented: ARKit's are assumed, and the owner can
+  mirror and flip.
+- **One engine for both** (`live_motion.py`): resting pose, mirror (on: like a reflection, as VTubing apps
+  do), smoothing, at most 30 updates a second, and recording into a gesture; one stage command
+  (`{"live": ...}`) that works for every kind of character and hands back by itself when updates stop.

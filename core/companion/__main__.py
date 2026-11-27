@@ -89,6 +89,8 @@ def main():
     parser.add_argument("--stage-socket", default="/run/companion/stage.sock")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=80)
+    parser.add_argument("--tls-port", type=int, default=443,
+                        help="the device's own HTTPS, for a phone's live camera when the owner turns it on (0: never)")
     parser.add_argument("--no-audio", action="store_true", help="no microphone or speaker (testing)")
     parser.add_argument("--button", default="auto", help="input device for the button, 'auto' or 'none'")
     parser.add_argument("--button-key", type=int, default=148, help="key code the button sends (148 = KEY_PROG1)")
@@ -104,6 +106,8 @@ def main():
         import shutil
         wifi = WiFi() if shutil.which("nmcli") else None
         device = Device(args.data, stage_socket=args.stage_socket, speaker=speaker, microphone=microphone, wifi=wifi)
+        device.tls_port = args.tls_port or None     # web.py: the live camera's HTTPS
+        device.web_host = args.host
         device.start()
         inputs = find_inputs() if args.button == "auto" else ([] if args.button == "none" else [args.button])
         for path in inputs:

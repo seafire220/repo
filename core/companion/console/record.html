@@ -22,6 +22,12 @@
   input[type=text] { width: 100%; }
   .ok { color: #2e7d32; } @media (prefers-color-scheme: dark) { .ok { color: #81c784; } }
   .buttons { display: flex; gap: 8px; flex-wrap: wrap; } .buttons button { flex: 1 1 auto; }
+  .camera { position: relative; }
+  #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #cam-seen { transform: scaleX(-1); }           /* a selfie view: as in a mirror */
+  .count { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 700 6rem/1 system-ui, sans-serif; color: #fff; text-shadow: 0 2px 12px #000; }
+  button.on { background: var(--accent); color: #fff; }
 </style>
 <script type="module" src="/static/record.js"></script>
 </head>
@@ -42,6 +48,27 @@
   <p id="problem" class="notice" hidden></p>
   <p id="getting-ready" class="muted" hidden></p>
 
+  <section id="live" class="step" hidden>
+    <h2>1. Your camera</h2>
+    <div class="camera">
+      <video id="cam" autoplay playsinline muted></video>
+      <canvas id="cam-seen" width="480" height="360"></canvas>
+      <div id="cam-count" class="count" hidden></div>
+    </div>
+    <p id="cam-note" class="muted">Prop the phone up so your head and shoulders are in view (and your arms, for
+      a gesture with them), facing it in good light.</p>
+    <button id="btn-cam" class="big">Start the camera</button>
+    <div id="cam-tools" hidden>
+      <button id="btn-live-rec" class="big">Record a gesture</button>
+      <button id="btn-copy" class="big secondary">Copy me on the screen</button>
+      <label><input type="checkbox" id="live-mirror" checked> Like a mirror (it copies you as your reflection does)</label>
+      <button id="btn-live-recentre" class="secondary small">Recentre (I am sitting differently now)</button>
+    </div>
+    <p class="muted">Recording: it counts three, then records until you press Stop (up to
+      <span class="max-seconds">20</span> seconds). Hold still for a moment before and after the gesture.
+      <a href="#" id="to-file">Or film with the camera app.</a></p>
+  </section>
+
   <section id="film" class="step" hidden>
     <h2>1. Film the gesture</h2>
     <ul class="tips">
@@ -54,6 +81,7 @@
     </ul>
     <label class="button big">Film it now<input type="file" id="camera" accept="video/*" capture="user" hidden></label>
     <label class="button big secondary">Choose a video<input type="file" id="pick" accept="video/*" hidden></label>
+    <p class="muted"><a href="#" id="to-live" hidden>Use the live camera instead.</a></p>
   </section>
 
   <section id="trim" class="step" hidden>
