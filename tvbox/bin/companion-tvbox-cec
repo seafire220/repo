@@ -5,10 +5,10 @@
 # switch their input to the box when it announces itself. Run by companion-tvbox-cec.service.
 case "${COMPANION_CEC:-off}" in
     on|yes|1) ;;
-    *) echo "HDMI-CEC not turned on (COMPANION_CEC=on in /etc/default/companion)"; exec sleep infinity ;;
+    *) echo "HDMI-CEC not turned on (COMPANION_CEC=on in /etc/default/companion)"; exit 0 ;;
 esac
 DEV="${COMPANION_CEC_DEVICE:-/dev/cec0}"
-command -v cec-ctl >/dev/null || { echo "cec-ctl is not installed"; exec sleep infinity; }
+command -v cec-ctl >/dev/null || { echo "cec-ctl is not installed"; exit 0; }
 cec-ctl -d "$DEV" --playback --osd-name "Companion" || exit 1
 # cec-follower answers the TV's questions (its name, its power state, which input it is on) as a player does.
 exec cec-follower -d "$DEV"

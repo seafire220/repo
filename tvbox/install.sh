@@ -82,7 +82,8 @@ if [ "$IMAGE" = 1 ]; then
         systemctl enable ssh.service 2>/dev/null || true
     else
         rm -f /root/.ssh/authorized_keys
-        systemctl disable ssh.service 2>/dev/null || true
+        # Neither the service nor its socket (which would start it on the first connection).
+        systemctl disable ssh.service ssh.socket 2>/dev/null || true
     fi
 fi
 

@@ -72,7 +72,7 @@ check "NetworkManager looks after the network" enabled multi-user.target Network
 check "and the Ethernet socket too (netplan, where the image has it)" sh -c "! test -d '$ROOT/etc/netplan' || grep -q 'renderer: NetworkManager' '$ROOT/etc/netplan/90-companion-networkmanager.yaml'"
 check "Weston and its kiosk shell installed" sh -c "test -x '$ROOT/usr/bin/weston' && ls '$ROOT'/usr/lib/*/weston/kiosk-shell.so"
 check "the screen: Weston's kiosk shell instead of cage (a drop-in that updates leave alone)" sh -c "grep -q '^ExecStart=\$' '$ROOT/etc/systemd/system/companion-stage.service.d/tvbox.conf' && grep -q '^ExecStart=/usr/bin/weston --config=/etc/companion/weston.ini' '$ROOT/etc/systemd/system/companion-stage.service.d/tvbox.conf'"
-check "the screen: 1920x1080, never blanking, the character launched" sh -c "grep -q '^mode=1920x1080@60' '$ROOT/etc/companion/weston.ini' && grep -q '^idle-time=0' '$ROOT/etc/companion/weston.ini' && grep -q '^path=/usr/local/lib/companion-tvbox/stage-in-weston' '$ROOT/etc/companion/weston.ini'"
+check "the screen: 1920x1080, never blanking, the character launched" sh -c "grep -qx 'mode=1920x1080' '$ROOT/etc/companion/weston.ini' && grep -q '^idle-time=0' '$ROOT/etc/companion/weston.ini' && grep -q '^path=/usr/local/lib/companion-tvbox/stage-in-weston' '$ROOT/etc/companion/weston.ini'"
 check "the character's program is run with the screen service's own arguments" sh -c "COMPANION_DRY_RUN=1 COMPANION_STAGE_UNIT='$ROOT/etc/systemd/system/companion-stage.service' sh '$ROOT/usr/local/lib/companion-tvbox/stage-in-weston' | grep -q '^/opt/companion/bin/stage /var/lib/companion/current.inp '"
 check "the remote's OK, Enter on a USB button or keyboard, and the remote's volume and mute keys" sh -c "grep -q '^COMPANION_BUTTON=any' '$ROOT/etc/default/companion' && grep -q '^COMPANION_BUTTON_KEYS=352,353,28,96,164' '$ROOT/etc/default/companion' && grep -q '^COMPANION_REMOTE_KEYS=1' '$ROOT/etc/default/companion'"
 check "the box's own sound card is routed to HDMI at each start" sh -c "test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-sound' && test -L '$ROOT/etc/systemd/system/multi-user.target.wants/companion-tvbox-sound.service'"
@@ -83,7 +83,7 @@ check "no first-login questions" sh -c "! test -e '$ROOT/root/.not_logged_in_yet
 if [ "$WITH_KEY" = 1 ]; then
     check "SSH for a maker's key only (no passwords)" sh -c "test -s '$ROOT/root/.ssh/authorized_keys' && grep -q '^PasswordAuthentication no' '$ROOT/etc/ssh/sshd_config.d/companion.conf'"
 else
-    check "SSH not enabled" absent_or_disabled ssh.service
+    check "SSH not enabled (neither the service nor its socket)" sh -c "! ls '$ROOT'/etc/systemd/system/*.wants/ssh.service '$ROOT'/etc/systemd/system/*.wants/ssh.socket >/dev/null 2>&1"
     check "no SSH keys let in" sh -c "! test -s '$ROOT/root/.ssh/authorized_keys'"
 fi
 check "hostname is companion" grep -qx companion "$ROOT/etc/hostname"

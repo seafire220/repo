@@ -173,7 +173,7 @@ class FilesTest(unittest.TestCase):
         ini.read(os.path.join(TVBOX, "config", "weston.ini"))
         self.assertEqual(ini["core"]["shell"], "kiosk-shell.so")
         self.assertEqual((ini["core"]["idle-time"], ini["core"]["require-input"]), ("0", "false"))
-        self.assertEqual((ini["output"]["name"], ini["output"]["mode"]), ("HDMI-A-1", "1920x1080@60"))
+        self.assertEqual((ini["output"]["name"], ini["output"]["mode"]), ("HDMI-A-1", "1920x1080"))
         self.assertEqual(ini["autolaunch"]["path"], "/usr/local/lib/companion-tvbox/stage-in-weston")
         self.assertEqual(ini["autolaunch"]["watch"], "true")
         with open(os.path.join(TVBOX, "config", "companion-stage-tvbox.conf")) as f:
