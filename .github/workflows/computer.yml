@@ -25,8 +25,6 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-    env:
-      COMPANION_TRY: ${{ runner.temp }}/companion-try
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +34,8 @@ jobs:
 
       - name: Set up, start, check (Mac)
         if: runner.os == 'macOS'
+        env:
+          COMPANION_TRY: ${{ runner.temp }}/companion-try
         run: |
           /usr/bin/python3 --version
           PYTHON=/usr/bin/python3 device/try-on-a-computer.sh --check
@@ -43,10 +43,13 @@ jobs:
       - name: Set up, start, check (Linux)
         if: runner.os == 'Linux'
         env:
+          COMPANION_TRY: ${{ runner.temp }}/companion-try
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a -s "-screen 0 1024x1024x24" device/try-on-a-computer.sh --check
 
       - name: The live camera's certificate, made with this system's own openssl (a Mac's is LibreSSL)
+        env:
+          COMPANION_TRY: ${{ runner.temp }}/companion-try
         run: |
           export PATH="/usr/bin:/bin:$PATH"
           openssl version
@@ -59,6 +62,9 @@ jobs:
           openssl x509 -in "$RUNNER_TEMP/tls/phone-cert.pem" -noout -text | grep -E "DNS:companion.local.*IP Address:192.168.1.20"
 
       - name: The stage draws with desktop OpenGL
+        env:
+          COMPANION_TRY: ${{ runner.temp }}/companion-try
+          LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           "$COMPANION_TRY/venv/bin/python" stage/tools/smoke_test.py "$COMPANION_TRY/stage-build/release/stage" \
             "$RUNNER_TEMP/smoke" --gl desktop
