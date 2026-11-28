@@ -34,7 +34,7 @@ use inox2d::render::InoxRendererExt;
 use inox2d_opengl::OpenglRenderer;
 use live2d::{Live2dPuppet, Live2dRenderer};
 use serde_json::json;
-use winit::window::{Fullscreen, WindowBuilder};
+use winit::window::{Fullscreen, Window};
 
 use behaviour::{Behaviour, State};
 use control::{Command, Events, Script};
@@ -1299,7 +1299,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 		control::spawn_socket(path, tx.clone(), events.clone())?;
 	}
 
-	let mut builder = WindowBuilder::new()
+	let mut builder = Window::default_attributes()
 		.with_title("Character stage")
 		.with_resizable(true)
 		.with_inner_size(winit::dpi::PhysicalSize::new(opts.width, opts.height));

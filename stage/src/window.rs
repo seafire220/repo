@@ -8,10 +8,10 @@ use std::error::Error;
 use std::ffi::CString;
 use std::num::NonZeroU32;
 
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
-use winit::window::{Window, WindowBuilder};
+use winit::window::{Window, WindowAttributes};
 
 use glutin::config::ConfigTemplateBuilder;
 use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentContext, Version};
@@ -44,11 +44,11 @@ pub struct AppFrame {
 	gl_config: glutin::config::Config,
 	gl_display: glutin::display::Display,
 	not_current_gl_context: Option<NotCurrentContext>,
-	window_builder: WindowBuilder,
+	window_attributes: WindowAttributes,
 }
 
 impl AppFrame {
-	pub fn init(window_builder: WindowBuilder, preference: GlPreference, depth: bool) -> Result<Self, Box<dyn Error>> {
+	pub fn init(window_attributes: WindowAttributes, preference: GlPreference, depth: bool) -> Result<Self, Box<dyn Error>> {
 		let event_loop = EventLoop::new()?;
 		let mut template = ConfigTemplateBuilder::new().with_transparency(false).with_stencil_size(8);
 		if depth {
@@ -56,8 +56,8 @@ impl AppFrame {
 		}
 
 		// Only Windows requires the window to be present before creating the display.
-		let maybe_window_builder = cfg!(target_os = "windows").then_some(window_builder.clone());
-		let display_builder = DisplayBuilder::new().with_window_builder(maybe_window_builder);
+		let maybe_window_attributes = cfg!(target_os = "windows").then_some(window_attributes.clone());
+		let display_builder = DisplayBuilder::new().with_window_attributes(maybe_window_attributes);
 
 		let (window, gl_config) = display_builder.build(&event_loop, template, |configs| {
 			// No multisampling: prefer the cheapest config (3D avatars asked for depth above).
@@ -66,7 +66,7 @@ impl AppFrame {
 				.unwrap()
 		})?;
 
-		let raw_window_handle = window.as_ref().map(|window| window.raw_window_handle());
+		let raw_window_handle = window.as_ref().and_then(|window| window.window_handle().ok()).map(|handle| handle.as_raw());
 		let gl_display = gl_config.display();
 
 		let es = ContextAttributesBuilder::new()
@@ -104,21 +104,23 @@ impl AppFrame {
 			gl_config,
 			gl_display,
 			not_current_gl_context: Some(context),
-			window_builder,
+			window_attributes,
 		})
 	}
 
 	pub fn run<A: App + 'static>(mut self, mut app: A) -> Result<(), Box<dyn Error>> {
 		let mut state = None;
 
+		// winit 0.30 still offers this closure form (its new form is a trait); it keeps this loop as it was.
+		#[allow(deprecated)]
 		self.event_loop.run(move |event, window_target| match event {
 			Event::Resumed => {
 				let window = self.window.take().unwrap_or_else(|| {
-					let window_builder = self.window_builder.clone();
-					glutin_winit::finalize_window(window_target, window_builder, &self.gl_config).unwrap()
+					let window_attributes = self.window_attributes.clone();
+					glutin_winit::finalize_window(window_target, window_attributes, &self.gl_config).unwrap()
 				});
 
-				let attrs = window.build_surface_attributes(Default::default());
+				let attrs = window.build_surface_attributes(Default::default()).expect("the window has no handle to draw on");
 				let gl_surface = unsafe {
 					self.gl_config
 						.display()
