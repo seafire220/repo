@@ -38,7 +38,8 @@ jobs:
           COMPANION_TRY: ${{ runner.temp }}/companion-try
         run: |
           /usr/bin/python3 --version
-          PYTHON=/usr/bin/python3 device/try-on-a-computer.sh --check
+          /bin/bash --version | head -n 1
+          PYTHON=/usr/bin/python3 /bin/bash device/try-on-a-computer.sh --check
 
       - name: Set up, start, check (Linux)
         if: runner.os == 'Linux'

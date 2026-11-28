@@ -75,6 +75,7 @@ fi
 
 # ----- run both halves
 LAN="$(PYTHONPATH="$REPO/core" "$VENV/bin/python" -c 'from companion.__main__ import lan_address; print(lan_address())')"
+[ -n "$LAN" ] || LAN="this-computers-address"
 GL=auto
 [ "$(uname -s)" = Darwin ] && GL=desktop                # a Mac has desktop OpenGL only
 rm -f "$SOCKET"
@@ -133,7 +134,7 @@ fi
 cat <<EOF
 
   Running. On this computer, open:   http://localhost:$PORT
-  On a phone on the same Wi-Fi:       http://${LAN:-THIS-COMPUTER'S-ADDRESS}:$PORT
+  On a phone on the same Wi-Fi:       http://$LAN:$PORT
 
   The character's window opens once there is something to show. Logs: $TRY/core.log and stage.log.
   Press Ctrl-C here to stop.
