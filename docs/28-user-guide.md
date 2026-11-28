@@ -450,17 +450,25 @@ you want it to know your age). The character is told your name in every conversa
 
 ### The weather
 
-Turn on **Know the weather** and the character knows today's and tomorrow's weather where you live: it
-mentions it when it says good morning and when it wakes you, the clock shows it, and you can ask ("will
-it rain this afternoon?"). Until you choose a town it uses your time zone's main city; **Change** finds
-yours in a list kept on the device (every town of 15,000 people or more; choose the nearest larger one if
-yours is not there). Temperatures are in **Celsius** or **Fahrenheit**, or the usual way where you are.
-**Save and check the weather** shows what the character would say.
+The character can know today's and tomorrow's weather where you live: it mentions it when it says good
+morning and when it wakes you, the clock shows it, and you can ask ("will it rain this afternoon?"). Like
+the AI services, the weather comes from a service you choose, with your own key:
 
-Forecasts come from MET Norway (the Norwegian Meteorological Institute), which offers them to everyone
-for free. Only your town's position, to about a kilometre, is sent; what you type to find your town is
-not sent anywhere. The device asks at most every half an hour, and only when something will show or
-say the weather.
+- **OpenWeather**: make a free account at openweathermap.org and copy your key from **My API keys**. A new
+  key can take a couple of hours to start working.
+- **WeatherAPI.com**: sign up for free at weatherapi.com and copy the key from your dashboard.
+
+Choose the service under **Weather service**, paste the key and press **Save key**. Like your other keys, it
+is kept only on the device and never shown again. The free plans are far more than the device needs (it
+asks at most every half an hour, and only when something will say or show the weather: a few thousand
+times a month at most).
+
+Until you choose a town it uses your time zone's main city; **Change** finds yours in a list kept on the
+device (every town of 15,000 people or more; choose the nearest larger one if yours is not there).
+Temperatures are in **Celsius** or **Fahrenheit**, or the usual way where you are. **Save and check the
+weather** shows what the character would say, or what went wrong (a key refused, no internet). Only your
+key and your town's position, to about a kilometre, go to the service; what you type to find your town is
+not sent anywhere.
 
 ### Good morning
 
@@ -560,8 +568,8 @@ Under **AI services**, in three parts:
   model you chose; with a model on your own computer, it stays in your home.
 - **The settings page** only answers on your home network, behind your
   password.
-- **The weather** (only if you turn it on): your town's position, to about
-  a kilometre, goes to MET Norway, with the software's name; nothing else.
+- **The weather** (only if you choose a weather service): your key and your
+  town's position, to about a kilometre, go to that service; nothing else.
   Your name, birthday, town and days are kept on the device, and left out
   of support reports.
 

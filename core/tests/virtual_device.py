@@ -34,7 +34,7 @@ def providers(which, device):
 async def main(data, port, host="127.0.0.1", tls_port="8443"):
     device = Device(data, speaker=Speaker(command=None), stage=FakeStage(), provider_factory=providers)
     device.tls_port, device.web_host = int(tls_port), host
-    device.weather.fetch = FakeFetch()          # a made-up forecast: trying the console never asks MET Norway
+    device.weather.fetch = FakeFetch()          # made-up forecasts: trying the console never asks a weather service
     device.start()
     runner = web.AppRunner(make_app(device))
     await runner.setup()

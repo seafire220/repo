@@ -33,10 +33,10 @@ Python packages.
 
 DATA
 
-The weather (when the owner turns it on): forecasts from MET Norway, the Norwegian Meteorological Institute
-(api.met.no), under the Creative Commons Attribution 4.0 International licence (CC BY 4.0,
-https://creativecommons.org/licenses/by/4.0/) and the Norwegian Licence for Open Government Data (NLOD 2.0).
-The device sums them up in words, and shows the temperature and a picture of its own drawing.
+The weather (when the owner chooses a weather service and adds their own key): forecasts from OpenWeather
+("Weather data provided by OpenWeather", openweathermap.org) or WeatherAPI.com ("Powered by WeatherAPI.com"),
+under the owner's own account and that service's terms. The device sums them up in words, and shows the
+temperature and a picture of its own drawing.
 
 The towns to choose the weather's place from: GeoNames (geonames.org), every place of 15,000 people or more,
 CC BY 4.0. Only each town's name, region, country, position (to two decimals), population and time zone are

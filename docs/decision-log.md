@@ -1075,11 +1075,9 @@ rejected. Settled entries are not reopened without new evidence.
 
 - Date: 2026-11-28
 - Decision: the owner chose items 3, 4 and 5 of `36-polish-review.md` (touch reactions are saved for later).
-  - **Weather from MET Norway's Locationforecast** (`core/companion/weather.py`): free for products that are
-    sold, with credit (CC BY 4.0); the device names itself and its makers (the maker's website from
-    `notices/product.json`, else the project's page), rounds the position to two decimals, respects the
-    service's expiry times and If-Modified-Since, asks at most every 30 minutes and only when the weather will
-    be said or shown, and keeps the last forecast for six hours. Off until the owner turns it on.
+  - **Weather** (`core/companion/weather.py`): first from MET Norway; replaced the same day by a service the
+    owner chooses, with their own key (D-075). Asked at most every 30 minutes, only when the weather will be
+    said or shown; the last forecast kept six hours. Off until the owner chooses a service.
   - **The town is chosen from a list on the device** (`core/companion/data/places.tsv.gz`, 34,000 towns of
     15,000 people or more from GeoNames, CC BY 4.0, made by `core/tools/make_places.py`), so what the owner
     types never leaves the device; until then, the time zone's main city from the system's time zone tables.
@@ -1104,3 +1102,23 @@ rejected. Settled entries are not reopened without new evidence.
   neither); **ringing forever** (five calls, then it stops and notes it, so a device in an empty house is not
   heard all day); **holidays of every country** (the owner adds their own days instead; more can come with
   other languages).
+
+## D-075 — The weather from the buyer's own key, like the AI services
+
+- Date: 2026-11-28
+- Decision: the weather comes from a service the buyer chooses, **OpenWeather** or **WeatherAPI.com**, with the
+  buyer's own key, kept and protected like the AI keys (`store.SECRET_NAMES`: never shown again, never in
+  backups, logs or support reports). Each service's forecast is turned into the device's own weather words
+  (`weather.py`: `parse_openweather`, `parse_weatherapi`), so summaries, the clock and the alarms work the same
+  with either. Only the key and the position (two decimals) are sent. A refused key is reported in plain words
+  on the settings page and not tried again for an hour, unless a new key is saved; nothing logged holds the
+  key or the address it was sent in. Each service's credit ("Weather data provided by OpenWeather", "Powered by
+  WeatherAPI.com") is shown on the settings page, as their free plans ask.
+- Why: the owner: "The user ought to supply their own API." With MET Norway (D-074) the device asked under the
+  seller's name, making the seller the service's user, responsible for its terms and for all devices' traffic
+  together; with the buyer's own key, the buyer is the user, as with the language models and voices (H4-H5).
+  Both services' free plans allow this use (OpenWeather: a million calls a month, commercial use allowed with
+  credit; WeatherAPI.com: 100,000 a month, "including commercial apps"); the device needs a few thousand.
+- Rejected: **MET Norway** (no key to bring: the seller would be its user); **Open-Meteo** (its free service has
+  no keys; its keys are for paid plans); **more services** for now (Tomorrow.io, Visual Crossing, Pirate Weather:
+  easy to add the same way if buyers ask).

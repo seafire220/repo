@@ -1,7 +1,7 @@
 """Your day (docs/28-user-guide.md): the weather, the morning hello, alarms the character says itself, daily
 wake-ups, special days with festive backgrounds, the clock over the character, and the photo frame.
 
-Nothing here asks MET Norway: the forecasts are made up (fakes.FakeFetch)."""
+Nothing here asks a weather service: the forecasts are made up (fakes.FakeFetch)."""
 import asyncio
 import datetime
 import gzip
@@ -25,7 +25,7 @@ from companion.memory import Memory  # noqa: E402
 from companion.overlays import CLOCK, HINT  # noqa: E402
 from companion.providers import ProviderError  # noqa: E402
 from companion.web import make_app  # noqa: E402
-from fakes import FakeFetch, FakeLLM, FakeStage, FakeTTS, forecast_doc  # noqa: E402
+from fakes import FakeFetch, FakeLLM, FakeStage, FakeTTS, openweather_docs, weatherapi_doc  # noqa: E402
 from test_package import good_files, manifest  # noqa: E402
 
 H = {"X-Companion": "1"}
@@ -104,30 +104,64 @@ class PlacesTest(unittest.TestCase):
         self.assertEqual(places.search("sydney", zone="Australia/Sydney")[0]["label"], "Sydney, New South Wales, Australia")
 
 
+def hour_of(t):
+    return datetime.datetime.fromtimestamp(t).hour
+
+
 class ForecastTest(unittest.TestCase):
     def test_symbols_in_words(self):
         self.assertEqual(weather.symbol("clearsky_day")[:2], ("sunny", "clear"))
         self.assertEqual(weather.symbol("clearsky_night")[:2], ("clear", "clear-night"))
         self.assertEqual(weather.symbol("lightrainshowers_day")[:2], ("light rain showers", "rain"))
-        self.assertEqual(weather.symbol("lightssleetshowersandthunder")[:2], ("light sleet showers and thunder", "thunder"))
+        self.assertEqual(weather.symbol("lightsleetshowersandthunder")[:2], ("light sleet showers and thunder", "thunder"))
         self.assertEqual(weather.symbol("heavysnow")[:2], ("heavy snow", "snow"))
+        self.assertEqual(weather.symbol("haze")[:2], ("hazy", "fog"))
         self.assertEqual(weather.symbol("nonsense")[:2], ("", "cloud"))
         self.assertGreater(weather.symbol("rain")[2], weather.symbol("cloudy")[2])
 
+    def test_each_service_s_conditions_in_the_device_s_words(self):
+        self.assertEqual([weather.openweather_symbol(i, icon) for i, icon in ((800, "01d"), (800, "01n"), (802, "03d"),
+                                                                              (804, "04d"), (501, "10d"), (520, "09d"),
+                                                                              (601, "13d"), (211, "11d"), (741, "50d"),
+                                                                              (799, ""))],
+                         ["clearsky_day", "clearsky_night", "partlycloudy_day", "overcast", "rain", "lightrainshowers",
+                          "snow", "rainandthunder", "fog", "fog"])
+        self.assertEqual([weather.weatherapi_symbol(c, d) for c, d in ((1000, 1), (1000, 0), (1003, 1), (1183, 1),
+                                                                       (1243, 1), (1276, 0), (1213, 1), (1135, 1),
+                                                                       (1012, 1), (9999, 1))],
+                         ["clearsky_day", "clearsky_night", "partlycloudy_day", "lightrain", "rainshowers",
+                          "heavyrainandthunder", "lightsnow", "fog", "haze", "cloudy"])
+        self.assertEqual(set(weather.WEATHERAPI) & {1000, 1282}, {1000, 1282})
+
+    def test_openweather_as_its_documentation_shows_it(self):
+        current = {"coord": {"lon": 10.99, "lat": 44.34}, "weather": [{"id": 501, "main": "Rain",
+                   "description": "moderate rain", "icon": "10d"}], "main": {"temp": 25.33}, "rain": {"1h": 3.16},
+                   "dt": 1661870592, "cod": 200}
+        forecast = {"cod": "200", "list": [
+            {"dt": 1661871600, "main": {"temp": 24.1}, "weather": [{"id": 500, "icon": "10d"}], "rain": {"3h": 0.26}},
+            {"dt": 1661882400, "main": {"temp": 21.5}, "weather": [{"id": 500, "icon": "10n"}], "rain": {"3h": 0.57}},
+            {"dt": 1661893200, "main": {"temp": 19.0}, "weather": [{"id": 804, "icon": "04n"}]}]}
+        hours = weather.parse_openweather(current, forecast, now=1661870600)
+        self.assertEqual([(h["t"], h["temp"], h["sym"], h["span"]) for h in hours],
+                         [(1661870592, 25.33, "rain", 1), (1661871600, 24.1, "lightrain", 3),
+                          (1661882400, 21.5, "lightrain", 3), (1661893200, 19.0, "overcast", 3)])
+        self.assertEqual([h["wet"] for h in hours], [3.16, 0.19, 0.0, 0.0],
+                         "each entry's rain is the next one's (it is for the three hours before it)")
+
     def test_a_day_summed_up(self):
         now = at(7)
-        doc = forecast_doc(start=now, hours=40, temps=lambda t: 12 + (datetime.datetime.fromtimestamp(t).hour - 7) * 0.8,
-                           symbols=lambda t: "rain" if 15 <= datetime.datetime.fromtimestamp(t).hour < 17 else "partlycloudy_day",
-                           wet=lambda t: 1.2 if 15 <= datetime.datetime.fromtimestamp(t).hour < 17 else 0.0)
-        hours = weather.parse(doc, now)
+        doc = weatherapi_doc(start=now, hours=40, temps=lambda t: 12 + (hour_of(t) - 7) * 0.8,
+                             codes=lambda t: 1189 if 15 <= hour_of(t) < 17 else 1003,
+                             wet=lambda t: 1.2 if 15 <= hour_of(t) < 17 else 0.0)
+        hours = weather.parse_weatherapi(doc, now)
         s = weather.summary({"hours": hours, "place": "Perth"}, now + 600)
         self.assertEqual((s["now"]["temp"], s["now"]["words"], s["now"]["icon"]), (12, "partly cloudy", "partly"))
         self.assertEqual((s["today"]["low"], s["today"]["high"]), (12, 25))
         self.assertEqual((s["today"]["words"], s["today"]["wet_from"]), ("partly cloudy", "3 pm"),
                          "two hours of rain in a cloudy day: when it comes")
-        long_rain = forecast_doc(start=now, hours=40, symbols=lambda t: "rain" if 11 <= datetime.datetime.fromtimestamp(t).hour < 20
-                                 else "cloudy", wet=lambda t: 1.0 if 11 <= datetime.datetime.fromtimestamp(t).hour < 20 else 0.0)
-        wet = weather.summary({"hours": weather.parse(long_rain, now)}, now)
+        long_rain = weatherapi_doc(start=now, hours=40, codes=lambda t: 1189 if 11 <= hour_of(t) < 20 else 1006,
+                                   wet=lambda t: 1.0 if 11 <= hour_of(t) < 20 else 0.0)
+        wet = weather.summary({"hours": weather.parse_weatherapi(long_rain, now)}, now)
         self.assertEqual((wet["today"]["words"], wet["today"]["wet_from"]), ("rain", None),
                          "rain matters more than clouds when it lasts")
         line = weather.describe(s)
@@ -136,76 +170,130 @@ class ForecastTest(unittest.TestCase):
         f = weather.summary({"hours": hours, "place": "Perth"}, now + 600, units="fahrenheit")
         self.assertEqual(f["now"]["temp"], 54)
         self.assertIn("degrees Fahrenheit", weather.describe(f))
-        cold = weather.summary({"hours": weather.parse(forecast_doc(start=now, temps=lambda t: -3.4), now)}, now)
+        cold = weather.summary({"hours": weather.parse_weatherapi(weatherapi_doc(start=now, temps=lambda t: -3.4), now)}, now)
         self.assertTrue(weather.spoken(cold).startswith("It's minus 3 degrees"), weather.spoken(cold))
         self.assertIsNone(weather.summary({"hours": hours}, now + 5 * 86400), "too old to say anything")
 
+    def test_a_three_hourly_forecast_too(self):
+        now = at(7)
+        current, forecast = openweather_docs(start=now, temps=lambda t: 10 + (hour_of(t) - 7) * 0.5,
+                                             wet=lambda t: 1.5 if hour_of(t) in (16, 17, 18) else 0.0)
+        s = weather.summary({"hours": weather.parse_openweather(current, forecast, now), "place": "Perth"}, now + 900)
+        self.assertEqual(s["now"]["temp"], 10)
+        self.assertEqual(s["today"]["words"], "partly cloudy")
+        self.assertIn(s["today"]["wet_from"], ("2 pm", "3 pm", "4 pm"), "rain in the afternoon, within the three hours")
+        self.assertIsNotNone(s["tomorrow"])
+
     def test_rain_later_in_a_dry_day_is_told_with_its_hour(self):
         now = at(7)
-        doc = forecast_doc(start=now, hours=30, symbols=lambda t: "partlycloudy_day",
-                           wet=lambda t: 0.6 if datetime.datetime.fromtimestamp(t).hour == 15 else 0.0)
-        s = weather.summary({"hours": weather.parse(doc, now)}, now)
+        doc = weatherapi_doc(start=now, hours=30, wet=lambda t: 0.6 if hour_of(t) == 15 else 0.0)
+        s = weather.summary({"hours": weather.parse_weatherapi(doc, now)}, now)
         self.assertEqual(s["today"]["wet_from"], "3 pm")
         self.assertIn("rain from about 3 pm", weather.spoken(s))
+
+
+KEY = "test-weather-key-1234567890"
 
 
 class WeatherTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.dir = tempfile.TemporaryDirectory()
         self.fetch = FakeFetch()
-        self.weather = weather.Weather(self.dir.name, fetch=self.fetch)
-        self.settings = {"weather": {"on": True, "place": dict(PERTH), "units": "auto"}}
+        self.keys = {"weatherapi": KEY, "openweather": KEY}
+        self.weather = weather.Weather(self.dir.name, fetch=self.fetch, secret=lambda name: self.keys.get(name, ""))
+        self.settings = {"weather": {"provider": "weatherapi", "place": dict(PERTH), "units": "auto"}}
 
     async def asyncTearDown(self):
         self.dir.cleanup()
 
-    async def test_off_means_nothing_is_asked(self):
-        self.assertIsNone(await self.weather.refresh({"weather": {"on": False, "place": PERTH}}, ""))
-        self.assertIsNone(await self.weather.refresh({"weather": {"on": True, "place": None}}, "Etc/UTC"))
+    async def test_without_a_service_or_its_key_nothing_is_asked(self):
+        self.assertIsNone(await self.weather.refresh({"weather": {"provider": "", "place": PERTH}}, ""))
+        self.assertIsNone(await self.weather.refresh({"weather": {"provider": "met", "place": PERTH}}, ""))
+        self.assertIsNone(await self.weather.refresh({"weather": {"provider": "weatherapi", "place": None}}, "Etc/UTC"))
+        self.keys.clear()
+        self.assertFalse(self.weather.on(self.settings), "chosen, but no key")
+        self.assertIsNone(await self.weather.refresh(self.settings, ""))
         self.assertEqual(self.fetch.asked, [])
 
-    async def test_asked_once_then_kept_until_it_expires(self):
+    async def test_weatherapi_asked_once_then_kept_for_half_an_hour(self):
         got = await self.weather.refresh(self.settings, "")
-        self.assertEqual(len(got["hours"]), 48)
+        self.assertEqual(len(got["hours"]), 49, "48 hours and the weather now")
         url, headers = self.fetch.asked[0]
-        self.assertTrue(url.endswith("compact?lat=-31.95&lon=115.86"), "only the position, to two decimals")
+        self.assertEqual(url, "https://api.weatherapi.com/v1/forecast.json?key=%s&q=-31.95,115.86&days=2&aqi=no"
+                              "&alerts=no" % KEY, "only the key and the position, to two decimals")
         self.assertTrue(headers["User-Agent"].startswith("CompanionDevice/"))
-        self.assertNotIn("If-Modified-Since", headers)
         await self.weather.refresh(self.settings, "")
         await self.weather.refresh(self.settings, "", now=time.time() + 25 * 60)
-        self.assertEqual(len(self.fetch.asked), 1, "not again before it expires")
-        self.fetch.status = 304
-        again = await self.weather.refresh(self.settings, "", now=time.time() + 2 * 3600)
+        self.assertEqual(len(self.fetch.asked), 1, "not again within half an hour")
+        await self.weather.refresh(self.settings, "", now=time.time() + 31 * 60)
         self.assertEqual(len(self.fetch.asked), 2)
-        self.assertEqual(self.fetch.asked[1][1]["If-Modified-Since"], "Sat, 28 Nov 2026 05:00:00 GMT")
-        self.assertIsNotNone(again, "not changed: the forecast kept is used")
         self.assertEqual(self.weather.now(self.settings, "")["place"], "Perth")
+        with open(os.path.join(self.dir.name, "weather.json")) as f:
+            self.assertNotIn(KEY, f.read(), "the key is not kept with it")
+
+    async def test_openweather_takes_two_asks(self):
+        self.settings["weather"]["provider"] = "openweather"
+        got = await self.weather.refresh(self.settings, "")
+        self.assertEqual([u.split("?")[0] for u, _ in self.fetch.asked],
+                         ["https://api.openweathermap.org/data/2.5/weather", "https://api.openweathermap.org/data/2.5/forecast"])
+        self.assertIn("lat=-31.95&lon=115.86&units=metric&appid=" + KEY, self.fetch.asked[0][0])
+        self.assertEqual(got["hours"][0]["span"], 1)
+        self.assertEqual(got["hours"][1]["span"], 3)
+        self.assertIsNotNone(self.weather.now(self.settings, ""))
+
+    async def test_a_refused_key_is_said_plainly_and_never_logged(self):
+        self.fetch.status = 401
+        with self.assertLogs("companion.weather", "WARNING") as logs:
+            self.assertIsNone(await self.weather.refresh(self.settings, ""))
+        self.assertEqual(self.weather.problem(self.settings, ""), "WeatherAPI.com refused the key")
+        self.assertFalse(any(KEY in line for line in logs.output), "the key is never logged")
+        await self.weather.refresh(self.settings, "", now=time.time() + 30 * 60)
+        self.assertEqual(len(self.fetch.asked), 1, "a refused key waits an hour")
+        self.keys["weatherapi"] = KEY + "-new"
+        self.fetch.status = 200
+        self.assertIsNotNone(await self.weather.refresh(self.settings, ""), "a new key is tried at once")
+        self.assertEqual(self.weather.problem(self.settings, ""), "")
+        self.settings["weather"]["provider"] = "openweather"
+        self.fetch.status = 401
+        await self.weather.refresh(self.settings, "")
+        self.assertIn("a couple of hours", self.weather.problem(self.settings, ""))
+        self.fetch.status, self.fetch.error = 403, 2007
+        self.settings["weather"]["provider"] = "weatherapi"
+        self.keys["weatherapi"] = KEY + "-third"
+        await self.weather.refresh(self.settings, "")
+        self.assertEqual(self.weather.problem(self.settings, ""), "this month's calls at WeatherAPI.com are used up")
 
     async def test_without_internet_the_last_forecast_is_used_for_a_while(self):
         await self.weather.refresh(self.settings, "")
         self.fetch.fail = True
         later = time.time() + 2 * 3600
-        self.assertIsNotNone(await self.weather.refresh(self.settings, "", now=later))
+        with self.assertLogs("companion.weather", "WARNING") as logs:
+            self.assertIsNotNone(await self.weather.refresh(self.settings, "", now=later))
+        self.assertFalse(any(KEY in line for line in logs.output), "a network error's address (with the key) is not logged")
+        self.assertIn("could not be reached", self.weather.problem(self.settings, ""))
         self.assertEqual(len(self.fetch.asked), 2)
         await self.weather.refresh(self.settings, "", now=later + 60)
         self.assertEqual(len(self.fetch.asked), 2, "after a failure it waits before asking again")
-        self.assertIsNone(self.weather.cached(self.weather.place(self.settings, ""), time.time() + 7 * 3600),
-                          "too old after six hours")
+        self.assertIsNone(self.weather.cached(self.settings, "", time.time() + 7 * 3600), "too old after six hours")
 
-    async def test_a_new_place_is_asked_for_at_once(self):
+    async def test_a_new_place_or_service_is_asked_for_at_once(self):
         await self.weather.refresh(self.settings, "")
-        moved = {"weather": {"on": True, "place": {"name": "Perth", "label": "Perth, Scotland", "latitude": 56.4,
-                                                   "longitude": -3.43}}}
-        self.assertIsNone(self.weather.cached(self.weather.place(moved, ""), time.time()), "not the old town's")
+        moved = {"weather": {"provider": "weatherapi", "place": {"name": "Perth", "label": "Perth, Scotland",
+                                                                   "latitude": 56.4, "longitude": -3.43}}}
+        self.assertIsNone(self.weather.cached(moved, "", time.time()), "not the old town's")
         await self.weather.refresh(moved, "")
         self.assertEqual(len(self.fetch.asked), 2)
-        self.assertIn("lat=56.40&lon=-3.43", self.fetch.asked[1][0])
+        self.assertIn("q=56.40,-3.43", self.fetch.asked[1][0])
+        moved["weather"]["provider"] = "openweather"
+        self.assertIsNone(self.weather.cached(moved, "", time.time()), "not the other service's")
 
     async def test_a_strange_answer_is_not_kept(self):
-        self.fetch.doc = {"properties": {"timeseries": []}}
+        self.fetch.weatherapi = {"forecast": {"forecastday": []}}
         self.assertIsNone(await self.weather.refresh(self.settings, ""))
-        self.fetch.status = 500
+        self.assertIn("no temperatures", self.weather.problem(self.settings, ""))
+        self.fetch.weatherapi = {"current": "nonsense"}
         self.assertIsNone(await self.weather.refresh(self.settings, "", now=time.time() + 3600))
+        self.assertIn("unexpected", self.weather.problem(self.settings, ""))
 
 
 class SpecialDaysTest(unittest.TestCase):
@@ -267,7 +355,7 @@ class SettingsTest(unittest.TestCase):
     def test_good_ones_are_kept(self):
         saved = self.store.update_settings({
             "owner": {"name": "Sam", "birthday": "02-29"},
-            "weather": {"on": True, "place": PERTH, "units": "celsius"},
+            "weather": {"provider": "openweather", "place": PERTH, "units": "celsius"},
             "alarms": {"wake_ups": [{"time": "06:45", "days": [0, 1, 2, 3, 4], "label": "work"}]},
             "special_days": {"dates": [{"date": "2026-12-01", "what": "moving house", "once": True}]},
             "clock": {"show": "idle", "hours": "24"}, "background": {"every": 30}})
@@ -279,7 +367,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_bad_ones_are_refused(self):
         for bad in ({"owner": {"birthday": "13-01"}}, {"owner": {"birthday": "1850-01-01"}}, {"owner": {"name": "x" * 41}},
-                    {"owner": {"name": "a\nb"}}, {"weather": {"units": "kelvin"}},
+                    {"owner": {"name": "a\nb"}}, {"weather": {"units": "kelvin"}}, {"weather": {"provider": "met"}},
                     {"weather": {"place": {"name": "x", "latitude": 91, "longitude": 0}}},
                     {"alarms": {"wake_ups": [{"time": "24:00"}]}}, {"alarms": {"wake_ups": [{"time": "07:00", "days": []}]}},
                     {"alarms": {"wake_ups": [{"time": "07:00", "days": [7]}]}},
@@ -348,6 +436,7 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
                              provider_factory=lambda which, d: self.made[which]() if which in self.made else None)
         self.fetch = FakeFetch()
         self.device.weather.fetch = self.fetch
+        self.device.store.set_secret("weatherapi", KEY)
         self.cid = self.device.characters.install(package.build(good_files(), manifest()))
         self.device.activate(self.cid)
         self.saved = (dict(device_module.RING_AGAIN), device_module.ANSWER_WINDOW, device_module.RING_WAIT)
@@ -374,7 +463,7 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_today_for_the_character(self):
         self.device.store.update_settings({"owner": {"name": "Sam", "birthday": datetime.date.today().strftime("%m-%d")},
-                                           "weather": {"on": True, "place": PERTH}})
+                                           "weather": {"provider": "weatherapi", "place": PERTH}})
         self.device.memory().add_memory("Dentist at 10", "plans and events", 3, datetime.date.today().isoformat())
         await self.device.weather_now()
         text = self.device.today_text()
@@ -382,12 +471,12 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Today is their birthday", text)
         self.assertIn("The weather in Perth (degrees", text)
         self.assertIn("Their plans for today, from what they told you: Dentist at 10.", text)
-        self.device.store.update_settings({"weather": {"on": False}, "owner": {"name": "", "birthday": ""}})
+        self.device.store.update_settings({"weather": {"provider": ""}, "owner": {"name": "", "birthday": ""}})
         self.assertNotIn("weather", self.device.today_text())
 
     async def test_the_morning_hello(self):
         self.device.store.update_settings({"speak_first": {"on": True, "quiet_from": 0, "quiet_to": 0},
-                                           "weather": {"on": True, "place": PERTH}})
+                                           "weather": {"provider": "weatherapi", "place": PERTH}})
         self.device.memory().add_turn("good night", "Sleep well!", now=at(22, days=-1))
         reply = await self.device.greet(now=at(7, 30))
         self.assertIsNotNone(reply)
@@ -490,7 +579,7 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_clock_shows_while_nobody_is_talking(self):
         self.device.store.update_settings({"clock": {"show": "idle", "hours": "24"},
-                                           "weather": {"on": True, "place": PERTH}})
+                                           "weather": {"provider": "weatherapi", "place": PERTH}})
         await self.device.weather_now()
         shown = self.device.clock_step(at(7, 42))
         self.assertEqual(shown[0], "07:42")
@@ -563,14 +652,23 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         found = (await r.json())["places"]
         self.assertIn("Perth, Western Australia, Australia", [p["label"] for p in found])
         r = await self.client.post("/api/weather/check", headers=H)
-        self.assertEqual(r.status, 409, "the weather is off")
-        r = await self.client.put("/api/settings", json={"weather": {"on": True, "place": {
+        self.assertEqual(r.status, 409, "no weather service chosen")
+        r = await self.client.put("/api/settings", json={"weather": {"provider": "openweather", "place": {
             k: found[0][k] for k in ("name", "label", "latitude", "longitude")}}}, headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.post("/api/weather/check", headers=H)
+        self.assertEqual((r.status, await r.text()), (409, "add the weather service's key first"))
+        r = await self.client.put("/api/keys/openweather", json={"value": KEY}, headers=H)
         self.assertEqual(r.status, 200)
         r = await self.client.post("/api/weather/check", headers=H)
         day = await r.json()
         self.assertTrue(day["weather_said"].startswith("The weather in Perth"), day)
-        self.assertIn("MET Norway", day["credit"])
+        self.assertEqual((day["provider"], day["key_set"], day["problem"]), ("openweather", True, ""))
+        self.assertEqual(day["providers"]["openweather"]["credit"], "Weather data provided by OpenWeather")
+        self.assertNotIn(KEY, json.dumps(day), "the key is never sent back")
+        keys = await (await self.client.get("/api/keys")).json()
+        self.assertTrue(keys["openweather"])
+        self.assertFalse(keys["weatherapi"])
         self.assertEqual(day["ringing"], [])
         thumb = await self.client.get("/api/backgrounds/fireworks/thumb")
         self.assertEqual(thumb.status, 200)

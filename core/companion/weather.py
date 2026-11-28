@@ -1,14 +1,14 @@
 """The weather where the owner lives: for the morning hello, wake-up alarms, the character's answers and the
 clock on the screen (docs/28-user-guide.md, "Your day").
 
-Forecasts come from MET Norway's Locationforecast (api.met.no), which may be used by products that are sold,
-with credit (CC BY 4.0; the credit is on the settings page and in the notices). Open-Meteo's free service
-was not used: its terms keep it for non-commercial use (docs/decision-log.md, D-074).
+Like the AI services, the weather comes from a service the owner chooses, with the owner's own key, kept with
+the other keys (store.py): OpenWeather or WeatherAPI.com, both free for this much use (docs/decision-log.md,
+D-075). The device sums each service's forecast up the same way, in words and pictures of its own.
 
-Only the place's latitude and longitude go to MET Norway, rounded to two decimals (about a kilometre), with
-the software's name and where its makers can be found, as MET Norway's terms ask of every program. A forecast
-is kept, and asked for again only once the time MET Norway gives has passed (and never within half an hour),
-with If-Modified-Since, as its terms ask. The last one is used for six hours if the internet is down.
+Only the place's latitude and longitude, rounded to two decimals (about a kilometre), and the key go to the
+service. The forecast is kept, and asked for again at most every half an hour, only when something will say or
+show it; the last one is used for six hours if the internet is down. A refused key is not tried again for an
+hour, unless the owner saves a new one. Nothing logged holds the key or the address it was sent to.
 
 The place is chosen on the settings page from a list kept on the device (data/places.tsv.gz: every town of
 15,000 people or more, from GeoNames, CC BY 4.0), so what the owner types to find their town never leaves the
@@ -16,13 +16,14 @@ device. Until they choose, it is the main city of the device's time zone (from t
 """
 import asyncio
 import datetime
-import email.utils
 import gzip
+import hashlib
 import json
 import logging
 import os
 import time
 import unicodedata
+import urllib.parse
 
 from .store import write_atomic
 
@@ -30,13 +31,17 @@ log = logging.getLogger("companion.weather")
 
 PLACES_FILE = os.path.join(os.path.dirname(__file__), "data", "places.tsv.gz")
 ZONE_TABLES = ("/usr/share/zoneinfo/zone1970.tab", "/usr/share/zoneinfo/zone.tab")
-FORECAST_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
-# Who is asking, as MET Norway's terms require: the software's name, and where its makers can be found. A seller
-# puts their own website in notices/product.json ("website"), which is used instead (docs/33-finishing.md).
-CONTACT = "https://github.com/seafire220/repo"
-CREDIT = "Weather forecasts from MET Norway (api.met.no), CC BY 4.0. Towns from GeoNames (geonames.org), CC BY 4.0."
+# The weather services: their names, where the owner gets a key, and the credit each asks to be shown.
+PROVIDERS = {
+    "openweather": {"name": "OpenWeather", "site": "https://openweathermap.org",
+                    "credit": "Weather data provided by OpenWeather"},
+    "weatherapi": {"name": "WeatherAPI.com", "site": "https://www.weatherapi.com",
+                   "credit": "Powered by WeatherAPI.com"},
+}
+TOWNS_CREDIT = "Towns from GeoNames (geonames.org), CC BY 4.0."
 REFRESH = 30 * 60        # never asked again sooner than this for the same place
 RETRY = 10 * 60          # after a failed ask, wait this long
+KEY_RETRY = 3600         # after a refused key, wait this long (or until a new key is saved)
 KEEP = 6 * 3600          # a forecast is used for this long after it was fetched
 AHEAD = 3 * 86400        # how much of the forecast is kept
 TIMEOUT = 12.0
@@ -166,17 +171,21 @@ class Places:
                 "label": ", ".join(p for p in (row[0], row[1], country) if p)}
 
 
-# ---------------------------------------------------------------- MET Norway's weather symbols
+# ---------------------------------------------------------------- weather in words
 
+# The device's own names for the weather (MET Norway's symbol names, which say everything a day's summary needs);
+# each service's conditions are turned into them.
 BASE = {"clearsky": ("clear", "clear", 0.0), "fair": ("mostly clear", "fair", 0.3),
         "partlycloudy": ("partly cloudy", "partly", 0.6), "cloudy": ("cloudy", "cloud", 1.0),
-        "fog": ("foggy", "fog", 1.5)}
+        "overcast": ("overcast", "cloud", 1.1), "haze": ("hazy", "fog", 1.2), "mist": ("misty", "fog", 1.3),
+        "smoke": ("smoky", "fog", 1.4), "dust": ("dusty", "fog", 1.4), "fog": ("foggy", "fog", 1.5)}
 SUNNY = {"clearsky": "sunny", "fair": "mostly sunny"}
+BY_TIME = ("clearsky", "fair", "partlycloudy")      # these have a day and a night picture
 
 
 def symbol(code):
-    """A MET Norway weather symbol in words, the picture that goes with it, and how much it matters in a day's
-    summary: "lightrainshowers_day" -> ("light rain showers", "rain", 2.9)."""
+    """The weather in words, the picture that goes with it, and how much it matters in a day's summary:
+    "lightrainshowers_day" -> ("light rain showers", "rain", 2.9)."""
     base, _, when = str(code or "").partition("_")
     if base in BASE:
         words, icon, weight = BASE[base]
@@ -189,8 +198,6 @@ def symbol(code):
     for s in ("light", "heavy"):
         if rest.startswith(s):
             strength, rest = s, rest[len(s):]
-            if rest.startswith("ss"):              # MET Norway's own spelling: "lightssleet", "lightssnow"
-                rest = rest[1:]
     thunder = rest.endswith("andthunder")
     rest = rest[:-len("andthunder")] if thunder else rest
     showers = rest.endswith("showers")
@@ -203,35 +210,163 @@ def symbol(code):
     return words, "thunder" if thunder else "snow" if rest in ("snow", "sleet") else "rain", weight
 
 
-def parse(doc, now=None):
-    """A Locationforecast (compact) document as a list of hours: {"t": seconds, "temp": °C, "sym": the symbol for
-    the next hour (or six), "wet": millimetres in the next hour (or a sixth of the next six), "span": hours}."""
+def _timed(code, day):
+    return "%s_%s" % (code, "day" if day else "night") if code in BY_TIME else code
+
+
+def _number(value):
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+# OpenWeather's condition ids (openweathermap.org/weather-conditions).
+OPENWEATHER = {
+    200: "lightrainandthunder", 201: "rainandthunder", 202: "heavyrainandthunder", 210: "lightrainandthunder",
+    211: "rainandthunder", 212: "heavyrainandthunder", 221: "rainandthunder", 230: "lightrainandthunder",
+    231: "lightrainandthunder", 232: "rainandthunder",
+    300: "lightrain", 301: "lightrain", 302: "rain", 310: "lightrain", 311: "lightrain", 312: "rain",
+    313: "lightrainshowers", 314: "rainshowers", 321: "lightrainshowers",
+    500: "lightrain", 501: "rain", 502: "heavyrain", 503: "heavyrain", 504: "heavyrain", 511: "sleet",
+    520: "lightrainshowers", 521: "rainshowers", 522: "heavyrainshowers", 531: "rainshowers",
+    600: "lightsnow", 601: "snow", 602: "heavysnow", 611: "sleet", 612: "lightsleetshowers", 613: "sleetshowers",
+    615: "lightsleet", 616: "sleet", 620: "lightsnowshowers", 621: "snowshowers", 622: "heavysnowshowers",
+    701: "mist", 711: "smoke", 721: "haze", 731: "dust", 741: "fog", 751: "dust", 761: "dust", 762: "dust",
+    771: "cloudy", 781: "heavyrainandthunder",
+    800: "clearsky", 801: "fair", 802: "partlycloudy", 803: "cloudy", 804: "overcast",
+}
+
+# WeatherAPI.com's condition codes (weatherapi.com/docs/weather_conditions.json).
+WEATHERAPI = {
+    1000: "clearsky", 1003: "partlycloudy", 1006: "cloudy", 1009: "overcast", 1012: "haze", 1015: "dust",
+    1018: "dust", 1021: "dust", 1024: "dust", 1027: "dust", 1030: "mist", 1033: "smoke", 1036: "smoke",
+    1039: "haze", 1042: "haze", 1045: "dust", 1048: "dust",
+    1063: "lightrainshowers", 1066: "lightsnowshowers", 1069: "lightsleetshowers", 1072: "lightsleet",
+    1087: "rainandthunder", 1114: "snow", 1117: "heavysnow", 1135: "fog", 1147: "fog",
+    1150: "lightrain", 1153: "lightrain", 1168: "lightsleet", 1171: "sleet", 1180: "lightrain", 1183: "lightrain",
+    1186: "rain", 1189: "rain", 1192: "heavyrain", 1195: "heavyrain", 1198: "lightsleet", 1201: "sleet",
+    1204: "lightsleet", 1207: "sleet", 1210: "lightsnow", 1213: "lightsnow", 1216: "snow", 1219: "snow",
+    1222: "heavysnow", 1225: "heavysnow", 1237: "sleet", 1240: "lightrainshowers", 1243: "rainshowers",
+    1246: "heavyrainshowers", 1249: "lightsleetshowers", 1252: "sleetshowers", 1255: "lightsnowshowers",
+    1258: "snowshowers", 1261: "lightsleetshowers", 1264: "sleetshowers", 1273: "lightrainandthunder",
+    1276: "heavyrainandthunder", 1279: "lightsnowandthunder", 1282: "heavysnowandthunder",
+}
+
+
+def openweather_symbol(condition, icon=""):
+    """An OpenWeather condition id (and its icon, "10d" or "10n", for day or night) in the device's names."""
+    try:
+        cid = int(condition)
+    except (TypeError, ValueError):
+        cid = 0
+    code = OPENWEATHER.get(cid) or {2: "rainandthunder", 3: "lightrain", 5: "rain", 6: "snow", 7: "fog"}.get(cid // 100, "cloudy")
+    return _timed(code, not str(icon or "").endswith("n"))
+
+
+def weatherapi_symbol(condition, is_day=1):
+    try:
+        code = WEATHERAPI.get(int(condition), "cloudy")
+    except (TypeError, ValueError):
+        code = "cloudy"
+    return _timed(code, bool(is_day))
+
+
+def _in_order(hours):
+    """Hours by time; an observation (now) after a forecast hour of the same moment, so it is the one used."""
+    return sorted(hours, key=lambda h: (h["t"], 1 if h.get("now") else 0))
+
+
+def parse_openweather(current, forecast, now=None):
+    """OpenWeather's current weather and its five-day, three-hourly forecast as the device's hours: {"t": seconds,
+    "temp": °C, "sym": the weather (the device's names), "wet": millimetres an hour, "span": hours it holds for}.
+    A forecast entry's rain is for the three hours before it, so each entry takes the next one's."""
     now = now or time.time()
     out = []
-    for entry in doc["properties"]["timeseries"]:
-        t = datetime.datetime.fromisoformat(entry["time"].replace("Z", "+00:00")).timestamp()
+    if current:
+        w = (current.get("weather") or [{}])[0]
+        wet = sum(_number((current.get(k) or {}).get("1h")) or 0.0 for k in ("rain", "snow"))
+        out.append({"t": int(current["dt"]), "temp": _number((current.get("main") or {}).get("temp")),
+                    "sym": openweather_symbol(w.get("id"), w.get("icon")), "wet": round(wet, 2), "span": 1, "now": True})
+    entries = (forecast or {}).get("list") or []
+    for i, e in enumerate(entries):
+        t = int(e["dt"])
         if t > now + AHEAD:
             break
-        data = entry.get("data") or {}
-        temp = ((data.get("instant") or {}).get("details") or {}).get("air_temperature")
-        nxt, span = data.get("next_1_hours"), 1
-        if not nxt:
-            nxt, span = data.get("next_6_hours"), 6
-        nxt = nxt or {}
-        sym = (nxt.get("summary") or {}).get("symbol_code")
-        wet = (nxt.get("details") or {}).get("precipitation_amount")
-        out.append({"t": round(t), "temp": temp if isinstance(temp, (int, float)) else None, "sym": sym,
-                    "wet": round(wet / span, 2) if isinstance(wet, (int, float)) else None, "span": span})
-    return out
+        w = (e.get("weather") or [{}])[0]
+        after = entries[i + 1] if i + 1 < len(entries) else {}
+        wet = sum(_number((after.get(k) or {}).get("3h")) or 0.0 for k in ("rain", "snow"))
+        out.append({"t": t, "temp": _number((e.get("main") or {}).get("temp")),
+                    "sym": openweather_symbol(w.get("id"), w.get("icon")), "wet": round(wet / 3, 2), "span": 3})
+    return _in_order(out)
 
 
-def _expires(headers, now):
-    """When MET Norway says to ask again (within half an hour to six hours from now)."""
+def parse_weatherapi(doc, now=None):
+    """WeatherAPI.com's forecast (with its current weather) as the device's hours (see parse_openweather)."""
+    now = now or time.time()
+    out = []
+    current = (doc or {}).get("current") or {}
+    if current:
+        out.append({"t": int(current.get("last_updated_epoch") or now), "temp": _number(current.get("temp_c")),
+                    "sym": weatherapi_symbol((current.get("condition") or {}).get("code"), current.get("is_day", 1)),
+                    "wet": round(_number(current.get("precip_mm")) or 0.0, 2), "span": 1, "now": True})
+    for day in ((doc or {}).get("forecast") or {}).get("forecastday") or []:
+        for h in day.get("hour") or []:
+            t = int(h["time_epoch"])
+            if t > now + AHEAD:
+                continue
+            out.append({"t": t, "temp": _number(h.get("temp_c")),
+                        "sym": weatherapi_symbol((h.get("condition") or {}).get("code"), h.get("is_day", 1)),
+                        "wet": round(_number(h.get("precip_mm")) or 0.0, 2), "span": 1})
+    return _in_order(out)
+
+
+class KeyRefused(WeatherError):
+    """The service refused the owner's key (wrong, not working yet, or turned off)."""
+
+
+def _refused(provider, status, body):
+    """Why a service said no, in the device's own words (never the service's text, which may repeat the request)."""
+    name = PROVIDERS[provider]["name"]
+    code = None
     try:
-        when = email.utils.parsedate_to_datetime(headers.get("Expires") or headers.get("expires") or "").timestamp()
-    except (TypeError, ValueError):
-        when = 0.0
-    return min(max(when, now + REFRESH), now + KEEP)
+        code = (json.loads(body or b"{}").get("error") or {}).get("code")
+    except (ValueError, AttributeError):
+        pass
+    if status == 401 or code in (1002, 2006):
+        later = " (a new OpenWeather key can take a couple of hours to start working)" if provider == "openweather" else ""
+        return KeyRefused("%s refused the key%s" % (name, later))
+    if code == 2008:
+        return KeyRefused("%s has turned this key off" % name)
+    if code == 2007:
+        return WeatherError("this month's calls at %s are used up" % name)
+    if status == 429:
+        return WeatherError("%s asked the device to slow down" % name)
+    return WeatherError("%s answered %s" % (name, status))
+
+
+HEADERS = {"Accept": "application/json"}
+
+
+async def _ask(fetch, provider, url):
+    status, _, body = await fetch(url, dict(HEADERS, **{"User-Agent": "CompanionDevice/%s" % _version()}))
+    if status != 200:
+        raise _refused(provider, status, body)
+    return json.loads(body)
+
+
+async def fetch_openweather(fetch, key, place, now):
+    query = "?lat=%.2f&lon=%.2f&units=metric&appid=%s" % (place["latitude"], place["longitude"], urllib.parse.quote(key, safe=""))
+    base = "https://api.openweathermap.org/data/2.5/"
+    current = await _ask(fetch, "openweather", base + "weather" + query)
+    forecast = await _ask(fetch, "openweather", base + "forecast" + query)
+    return parse_openweather(current, forecast, now)
+
+
+async def fetch_weatherapi(fetch, key, place, now):
+    url = "https://api.weatherapi.com/v1/forecast.json?key=%s&q=%.2f,%.2f&days=2&aqi=no&alerts=no" % (
+        urllib.parse.quote(key, safe=""), place["latitude"], place["longitude"])
+    return parse_weatherapi(await _ask(fetch, "weatherapi", url), now)
+
+
+FETCH = {"openweather": fetch_openweather, "weatherapi": fetch_weatherapi}
 
 
 def clock_words(t):
@@ -325,14 +460,6 @@ def spoken(s):
     return line + "."
 
 
-def user_agent():
-    """How the device introduces itself to MET Norway: the software's name and version, and where its makers can
-    be found (the maker's website from notices/product.json, once the seller has filled it in)."""
-    from . import notices
-    website = str(notices.product().get("website") or "").strip()
-    return "CompanionDevice/%s %s" % (_version(), website if website and len(website) < 200 else CONTACT)
-
-
 def _version():
     try:
         with open(os.path.join(os.path.dirname(__file__), "VERSION"), encoding="utf-8") as f:
@@ -352,18 +479,26 @@ async def _http_get(url, headers):
 
 
 class Weather:
-    """The forecast for the owner's place, asked for when due and kept in DATA/weather.json."""
+    """The forecast for the owner's place, from the service they chose, asked for when due and kept in
+    DATA/weather.json. `secret(name)` gives a key (store.Store.secret)."""
 
-    def __init__(self, data_dir, fetch=None, places=None):
+    def __init__(self, data_dir, fetch=None, places=None, secret=None):
         self.path = os.path.join(data_dir, "weather.json")
         self.fetch = fetch or _http_get
         self.places = places or Places()
+        self.secret = secret or (lambda name: "")
         self._lock = asyncio.Lock()
-        self.asks = 0                    # how many times MET Norway was asked (for tests and the support report)
+        self.asks = 0                    # how many times a service was asked (for tests)
 
     @staticmethod
-    def on(settings):
-        return bool((settings.get("weather") or {}).get("on"))
+    def provider(settings):
+        chosen = (settings.get("weather") or {}).get("provider") or ""
+        return chosen if chosen in PROVIDERS else ""
+
+    def on(self, settings):
+        """A service is chosen and its key saved."""
+        provider = self.provider(settings)
+        return bool(provider and self.secret(provider))
 
     def place(self, settings, zone):
         """The place the weather is for: the owner's choice, else the time zone's city; or None."""
@@ -384,6 +519,17 @@ class Weather:
         units = (settings.get("weather") or {}).get("units", "auto")
         return units if units in ("celsius", "fahrenheit") else guess_units(zone)
 
+    def _kept_for(self, settings, zone):
+        """What the kept forecast must be for: the service, its key (a short fingerprint, never the key) and the
+        place; None when there is no weather."""
+        provider = self.provider(settings)
+        key = self.secret(provider) if provider else ""
+        place = self.place(settings, zone) if key else None
+        if place is None:
+            return None
+        print_ = hashlib.sha256(("%s:%s" % (provider, key)).encode()).hexdigest()[:12]
+        return "%s|%s|%.2f,%.2f" % (provider, print_, place["latitude"], place["longitude"])
+
     def _saved(self):
         try:
             with open(self.path, encoding="utf-8") as f:
@@ -396,75 +542,71 @@ class Weather:
         if os.path.exists(self.path):
             os.remove(self.path)
 
-    def cached(self, place, now=None):
-        """The forecast kept for this place, while it is fresh enough to use; asks nothing."""
+    def cached(self, settings, zone, now=None):
+        """The forecast kept, while it is fresh enough to use and for what is chosen now; asks nothing."""
         now = now or time.time()
+        kept_for = self._kept_for(settings, zone)
         data = self._saved()
-        if not place or data.get("key") != _key(place) or not data.get("hours") or now - data.get("fetched", 0) > KEEP:
+        if not kept_for or data.get("key") != kept_for or not data.get("hours") or now - data.get("fetched", 0) > KEEP:
             return None
         return data
 
     def due(self, settings, zone, now=None):
-        """Whether it is time to ask MET Norway again (the weather on, a place known, the last forecast old)."""
+        """Whether it is time to ask the service again."""
         now = now or time.time()
-        place = self.place(settings, zone) if self.on(settings) else None
-        if place is None:
+        kept_for = self._kept_for(settings, zone)
+        if kept_for is None:
             return False
         data = self._saved()
-        if data.get("key") != _key(place):
-            return now >= data.get("failed", 0) + RETRY or data.get("failed_key") != _key(place)
-        if now < data.get("failed", 0) + RETRY:
+        if data.get("failed_key") == kept_for and now < data.get("failed", 0) + (
+                KEY_RETRY if data.get("key_refused") else RETRY):
             return False
-        return now >= max(data.get("expires", 0), data.get("fetched", 0) + REFRESH)
+        return data.get("key") != kept_for or now >= data.get("fetched", 0) + REFRESH
+
+    def problem(self, settings, zone):
+        """Why the last ask for what is chosen now failed (with no forecast since), in words; or ""."""
+        data = self._saved()
+        kept_for = self._kept_for(settings, zone)
+        if kept_for and data.get("failed_key") == kept_for and data.get("failed", 0) > (
+                data.get("fetched", 0) if data.get("key") == kept_for else 0):
+            return str(data.get("problem") or "")
+        return ""
 
     async def refresh(self, settings, zone, now=None):
-        """Ask for the forecast if it is due. Returns the forecast to use now, or None (off, no place, or none
-        fetched for six hours)."""
-        if not self.on(settings):
-            return None
-        place = self.place(settings, zone)
-        if place is None:
+        """Ask for the forecast if it is due. Returns the forecast to use now, or None (no service, key or place,
+        or none fetched for six hours)."""
+        if self._kept_for(settings, zone) is None:
             return None
         async with self._lock:
             now = now or time.time()
             if not self.due(settings, zone, now):
-                return self.cached(place, now)
+                return self.cached(settings, zone, now)
+            provider = self.provider(settings)
+            place = self.place(settings, zone)
+            kept_for = self._kept_for(settings, zone)
             data = self._saved()
-            same = data.get("key") == _key(place)
-            url = "%s?lat=%.2f&lon=%.2f" % (FORECAST_URL, place["latitude"], place["longitude"])
-            headers = {"User-Agent": user_agent(), "Accept": "application/json"}
-            if same and data.get("modified"):
-                headers["If-Modified-Since"] = data["modified"]
             self.asks += 1
+            name = PROVIDERS[provider]["name"]
             try:
-                status, got, body = await self.fetch(url, headers)
-                if status == 304 and same and data.get("hours"):
-                    data.update(fetched=now, expires=_expires(got, now))
-                elif status == 200:
-                    hours = parse(json.loads(body), now)
-                    if not hours:
-                        raise WeatherError("the forecast had no hours in it")
-                    data = {"key": _key(place), "place": place["name"], "fetched": now, "expires": _expires(got, now),
-                            "modified": got.get("Last-Modified") or got.get("last-modified") or "", "hours": hours}
-                else:
-                    raise WeatherError("MET Norway answered %s" % status)
-            except (WeatherError, ValueError, KeyError, TypeError, OSError, asyncio.TimeoutError) as error:
+                hours = await FETCH[provider](self.fetch, self.secret(provider), place, now)
+                if not any(h["temp"] is not None for h in hours):
+                    raise WeatherError("%s sent a forecast with no temperatures" % name)
+                data = {"key": kept_for, "place": place["name"], "provider": provider, "fetched": now, "hours": hours}
+            except WeatherError as error:            # the device's own words: no address, no key
                 log.warning("the weather could not be fetched: %s", error)
-                data.update(failed=now, failed_key=_key(place))
-            except Exception as error:                  # aiohttp's own errors, among others
-                log.warning("the weather could not be fetched: %s: %s", type(error).__name__, error)
-                data.update(failed=now, failed_key=_key(place))
+                data.update(failed=now, failed_key=kept_for, problem=str(error), key_refused=isinstance(error, KeyRefused))
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError):
+                log.warning("the weather could not be fetched: %s sent something unexpected", name)
+                data.update(failed=now, failed_key=kept_for, problem="%s sent something unexpected" % name,
+                            key_refused=False)
+            except Exception as error:               # the network; its message can hold the address, and the key
+                log.warning("the weather could not be fetched: %s (%s)", name, type(error).__name__)
+                data.update(failed=now, failed_key=kept_for, key_refused=False,
+                            problem="%s could not be reached: is the device on the internet?" % name)
             write_atomic(self.path, json.dumps(data))
-            return self.cached(place, now)
+            return self.cached(settings, zone, now)
 
     def now(self, settings, zone, now=None):
         """The weather summed up from the kept forecast ({"now", "today", "tomorrow", ...}), or None."""
-        if not self.on(settings):
-            return None
-        place = self.place(settings, zone)
-        forecast = self.cached(place, now)
+        forecast = self.cached(settings, zone, now)
         return summary(forecast, now, self.units(settings, zone)) if forecast else None
-
-
-def _key(place):
-    return "%.2f,%.2f" % (place["latitude"], place["longitude"])

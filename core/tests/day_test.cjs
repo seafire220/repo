@@ -1,6 +1,6 @@
 // The settings page's "Your day" tab, in headless Chromium against tests/virtual_device.py (whose weather is made
-// up: nothing asks MET Norway): about you, the weather's town, a wake-up, a day of your own, the clock; saving,
-// checking the weather, trying a wake-up and stopping it.
+// up: nothing asks a weather service): about you, a weather service and its key, the weather's town, a wake-up,
+// a day of your own, the clock; saving, checking the weather, trying a wake-up and stopping it.
 //
 //   python3 tests/virtual_device.py DATA PORT
 //   node tests/day_test.cjs http://127.0.0.1:PORT CHAR_FILE
@@ -37,7 +37,13 @@ const check = (name, ok, extra) => { checks.push([name, !!ok]); console.log((ok 
   await page.fill("#day-name", "Sam");
   await page.selectOption("#day-bmonth", "07");
   await page.fill("#day-bday", "9");
-  await page.check("#day-weather");
+  check("no weather service to begin with", (await page.inputValue("#day-wx-provider")) === "" && await page.isHidden("#day-wx-key"));
+  await page.selectOption("#day-wx-provider", "openweather");
+  check("choosing one asks for its key, with where to get it", (await page.textContent("#day-wx-key")).includes("openweathermap.org"));
+  await page.fill("#day-wx-key-input", "a-made-up-weather-key-12345");
+  await page.click("#btn-day-wx-key");
+  await page.waitForFunction(() => document.querySelector("#day-wx-key").textContent.includes("Key saved"), null, { timeout: 5000 });
+  check("the key is saved and not shown again", (await page.inputValue("#day-wx-key-input")) === "");
   await page.click("#btn-day-place");
   await page.fill("#day-place-q", "perth");
   await page.waitForSelector("#day-place-list button");
@@ -66,8 +72,9 @@ const check = (name, ok, extra) => { checks.push([name, !!ok]); console.log((ok 
   await page.waitForFunction(() => document.querySelector("#day-msg").textContent === "Saved.", null, { timeout: 10000 });
   const s = await page.evaluate(async () => (await fetch("/api/settings")).json());
   check("about you is kept", s.owner.name === "Sam" && s.owner.birthday === "07-09", JSON.stringify(s.owner));
-  check("the town is kept", s.weather.on && s.weather.place && s.weather.place.label.startsWith("Perth, Western Australia"),
-    JSON.stringify(s.weather.place));
+  check("the service and town are kept", s.weather.provider === "openweather" && s.weather.place &&
+    s.weather.place.label.startsWith("Perth, Western Australia"), JSON.stringify(s.weather));
+  check("the key is not in the settings", !JSON.stringify(s).includes("a-made-up-weather-key"));
   const w = s.alarms.wake_ups[0] || {};
   check("the wake-up is kept", w.time === "06:45" && w.label === "work" && w.days.join() === "0,1,2,3,4,5" && w.id,
     JSON.stringify(w));
@@ -81,6 +88,7 @@ const check = (name, ok, extra) => { checks.push([name, !!ok]); console.log((ok 
     null, { timeout: 15000 });
   check("the weather is checked", (await page.textContent("#day-weather-msg")).includes("The weather in Perth"),
     await page.textContent("#day-weather-msg"));
+  check("the service's credit is shown", (await page.textContent("#day-credit")).includes("Weather data provided by OpenWeather"));
 
   await page.selectOption("#day-bmonth", "07");
   await page.fill("#day-bday", "");

@@ -294,8 +294,12 @@
       <input type="number" id="day-byear" min="1900" max="2100" placeholder="year (if you like)" aria-label="Year"></div>
 
     <h3>Weather</h3>
-    <label><input type="checkbox" id="day-weather"> Know the weather: the character mentions it when it says good
-      morning and wakes you, shows it with the clock, and can answer about it</label>
+    <p class="muted">The character can know the weather where you live: it mentions it when it says good morning and
+      wakes you, shows it with the clock, and can answer about it. Like the AI services, the weather comes from a
+      service you choose, with your own key (free for this much use).</p>
+    <label>Weather service <select id="day-wx-provider"><option value="">none</option>
+      <option value="openweather">OpenWeather</option><option value="weatherapi">WeatherAPI.com</option></select></label>
+    <div class="keybox" id="day-wx-key" hidden></div>
     <p>For <strong id="day-place">…</strong> <button type="button" class="small secondary" id="btn-day-place">Change</button></p>
     <div id="day-place-find" hidden>
       <label>Your town (or the nearest larger one) <input id="day-place-q" autocomplete="off" placeholder="start typing, e.g. Perth"></label>
@@ -307,7 +311,7 @@
     <p><button type="button" class="secondary" id="btn-day-weather-check">Save and check the weather</button>
       <span id="day-weather-msg"></span></p>
     <p class="muted">The towns are a list kept on the device, so what you type is not sent anywhere. For the forecast,
-      only your town's position, to about a kilometre, is sent. <span id="day-credit"></span></p>
+      only your town's position, to about a kilometre, and your key go to the service. <span id="day-credit"></span></p>
 
     <h3>Mornings</h3>
     <label><input type="checkbox" id="day-morning"> Good morning: the first time it hears you each morning, it says good

@@ -129,40 +129,74 @@ class FakeStage:
         return [c["state"] for c in self.commands if "state" in c]
 
 
-def forecast_doc(start=None, hours=48, temps=None, symbols=None, wet=None):
-    """A made-up MET Norway Locationforecast (compact) document, hourly from `start` (seconds; to the hour before)."""
+def _stamp(t):
     import datetime
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def weatherapi_doc(start=None, hours=48, temps=None, codes=None, wet=None, current=True):
+    """A made-up WeatherAPI.com forecast.json answer: hourly from the hour before `start` (seconds), with its
+    current weather. `temps`, `codes` (WeatherAPI.com condition codes) and `wet` (mm) are functions of the time."""
     import time
     start = int((start or time.time()) // 3600 * 3600)
-    series = []
+    temp = temps or (lambda t: 18.0)
+    code = codes or (lambda t: 1003)
+    rain = wet or (lambda t: 0.0)
+    days = {}
     for k in range(hours):
         t = start + k * 3600
-        series.append({
-            "time": datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "data": {"instant": {"details": {"air_temperature": temps(t) if temps else 18.0}},
-                     "next_1_hours": {"summary": {"symbol_code": symbols(t) if symbols else "partlycloudy_day"},
-                                      "details": {"precipitation_amount": wet(t) if wet else 0.0}}}})
-    return {"type": "Feature", "properties": {"meta": {"units": {"air_temperature": "celsius"}}, "timeseries": series}}
+        days.setdefault(_stamp(t)[:10], []).append({"time_epoch": t, "temp_c": temp(t), "is_day": 1,
+                                                     "condition": {"code": code(t)}, "precip_mm": rain(t)})
+    doc = {"location": {"name": "Made-up town"},
+           "forecast": {"forecastday": [{"date": d, "hour": h} for d, h in sorted(days.items())]}}
+    if current:
+        doc["current"] = {"last_updated_epoch": start + 600, "temp_c": temp(start), "is_day": 1,
+                          "condition": {"code": code(start)}, "precip_mm": rain(start)}
+    return doc
+
+
+def openweather_docs(start=None, temps=None, ids=None, wet=None):
+    """A made-up OpenWeather current weather and five-day forecast (three-hourly from `start`). `ids` are
+    OpenWeather condition ids; `wet` (mm in the three hours before each entry)."""
+    import time
+    start = int((start or time.time()) // 3600 * 3600)
+    temp = temps or (lambda t: 18.0)
+    cid = ids or (lambda t: 802)
+    rain = wet or (lambda t: 0.0)
+    current = {"dt": start + 600, "main": {"temp": temp(start)}, "weather": [{"id": cid(start), "icon": "03d"}],
+               "rain": {"1h": rain(start)}}
+    entries = []
+    for k in range(40):
+        t = start + 3600 + k * 3 * 3600
+        entries.append({"dt": t, "main": {"temp": temp(t)}, "weather": [{"id": cid(t), "icon": "03d"}],
+                        "rain": {"3h": rain(t)}, "dt_txt": _stamp(t)})
+    return current, {"cod": "200", "cnt": len(entries), "list": entries}
 
 
 class FakeFetch:
-    """Stands in for the internet when the weather is fetched (weather.Weather's `fetch`): answers with a made-up
-    forecast, and keeps each ask (the address and the headers)."""
+    """Stands in for the internet when the weather is fetched (weather.Weather's `fetch`): answers as OpenWeather or
+    WeatherAPI.com do, with made-up forecasts, and keeps each ask (the address and the headers)."""
 
-    def __init__(self, doc=None, status=200, expires_in=3600):
-        self.doc, self.status, self.expires_in = doc, status, expires_in
+    def __init__(self, status=200, weatherapi=None, openweather=None):
+        self.status = status
+        self.weatherapi = weatherapi
+        self.openweather = openweather
         self.asked = []
         self.fail = False
+        self.error = None                  # a WeatherAPI.com error code to answer with
 
     async def __call__(self, url, headers):
-        import email.utils
         import json
-        import time
         self.asked.append((url, dict(headers)))
         if self.fail:
-            raise OSError("no internet")
-        answer = {"Expires": email.utils.formatdate(time.time() + self.expires_in, usegmt=True),
-                  "Last-Modified": "Sat, 28 Nov 2026 05:00:00 GMT"}
+            raise OSError("no internet at " + url)
         if self.status != 200:
-            return self.status, answer, b""
-        return 200, answer, json.dumps(self.doc or forecast_doc()).encode()
+            return self.status, {}, json.dumps({"error": {"code": self.error or 0, "message": "no: " + url}}).encode()
+        if "api.weatherapi.com/v1/forecast.json" in url:
+            return 200, {}, json.dumps(self.weatherapi or weatherapi_doc()).encode()
+        current, forecast = self.openweather or openweather_docs()
+        if "api.openweathermap.org/data/2.5/weather" in url:
+            return 200, {}, json.dumps(current).encode()
+        if "api.openweathermap.org/data/2.5/forecast" in url:
+            return 200, {}, json.dumps(forecast).encode()
+        return 404, {}, b"{}"

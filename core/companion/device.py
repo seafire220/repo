@@ -109,7 +109,7 @@ class Device:
         self.animations = animations.Animations(self.characters)
         self.backgrounds = backgrounds.Backgrounds(data_dir)
         self.background_sent = None      # the picture the stage was last told to show
-        self.weather = weather_module.Weather(data_dir)
+        self.weather = weather_module.Weather(data_dir, secret=self.store.secret)
         self._weather_task = None        # a forecast being fetched in the background
         self.rings = {}                  # alarms and timers ringing now: label -> task
         self._answered = None            # set when someone answers a ringing alarm (speaks, or presses the button)

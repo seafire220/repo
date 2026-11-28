@@ -539,13 +539,19 @@ class Console:
         specials = device.specials(cid=cid) if cid else special_days.on(datetime.date.today(), settings)
         weather = device.weather.now(settings, zone)
         arrived = device.arrival(cid) if cid else None
+        provider = device.weather.provider(settings)
         return {
             "timezone": zone,
             "place": device.weather.place(settings, zone),
             "units": device.weather.units(settings, zone),
+            "provider": provider,
+            "key_set": bool(provider and device.store.secret(provider)),
+            "providers": {k: {"name": v["name"], "site": v["site"], "credit": v["credit"]}
+                          for k, v in weather_module.PROVIDERS.items()},
             "weather": weather,
             "weather_said": weather_module.describe(weather),
-            "credit": weather_module.CREDIT,
+            "problem": device.weather.problem(settings, zone),
+            "credit": weather_module.TOWNS_CREDIT,
             "specials": [{"kind": x["kind"], "what": x["what"]} for x in specials],
             "festive": special_days.festive(specials, settings),
             "arrived": arrived.isoformat() if arrived else None,
@@ -568,15 +574,17 @@ class Console:
     async def check_weather(self, request):
         """Fetch the forecast now (if it is due), and show what the character would say."""
         settings = self.device.store.settings()
+        if not self.device.weather.provider(settings):
+            raise web.HTTPConflict(text="choose a weather service first")
         if not self.device.weather.on(settings):
-            raise web.HTTPConflict(text="turn the weather on first")
+            raise web.HTTPConflict(text="add the weather service's key first")
         if self.device.weather.place(settings, self.device.timezone()) is None:
             raise web.HTTPConflict(text="choose your town first")
         await self.device.weather_now(wait=15.0)
         self.device.clock_step()
         status = self._day_status()
-        if status["weather"] is None:
-            status["problem"] = "MET Norway could not be reached. Is the device on the internet? It tries again in ten minutes."
+        if status["weather"] is None and not status["problem"]:
+            status["problem"] = "no weather yet; it tries again in ten minutes"
         return web.json_response(status)
 
     async def stop_alarm(self, request):

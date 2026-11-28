@@ -67,10 +67,10 @@ DEFAULT_SETTINGS = {
     # The owner (docs/28-user-guide.md, "Your day"): what the character calls them, and their birthday ("MM-DD",
     # or "YYYY-MM-DD" to know their age).
     "owner": {"name": "", "birthday": ""},
-    # The weather (weather.py), for the morning hello, wake-ups and the clock: off unless the owner turns it on.
-    # `place`: the town chosen on the settings page (None or {} for the time zone's city); `units`: "auto",
-    # "celsius" or "fahrenheit".
-    "weather": {"on": False, "place": {}, "units": "auto"},
+    # The weather (weather.py), for the morning hello, wake-ups and the clock: from the service the owner chooses
+    # ("" for none, "openweather", "weatherapi"), with their own key; `place`: the town chosen on the settings page
+    # (None or {} for the time zone's city); `units`: "auto", "celsius" or "fahrenheit".
+    "weather": {"provider": "", "place": {}, "units": "auto"},
     # Daily wake-ups ({"id", "time": "HH:MM", "days": [0-6, Monday first], "label", "on"}), which the character
     # says itself; `repeat`: it calls again, a little louder each time, until someone answers (up to five times).
     "alarms": {"wake_ups": [], "repeat": True},
@@ -90,7 +90,7 @@ MAX_DATES = 30
 SECRET_NAMES = (
     "openai", "anthropic", "openai_compatible", "elevenlabs",
     "cartesia", "fishaudio", "inworld", "minimax", "deepgram", "google_tts",
-    "groq", "openrouter", "search", "local_llm",
+    "groq", "openrouter", "search", "local_llm", "openweather", "weatherapi",
 )
 
 
@@ -237,13 +237,14 @@ def _check_choices(changes):
 
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
                         ("family_safe", "on"), ("wake_word", "on"), ("live", "camera"), ("live", "mirror"),
-                        ("live", "flip"), ("background", "parallax"), ("speak_first", "morning"), ("weather", "on"),
+                        ("live", "flip"), ("background", "parallax"), ("speak_first", "morning"),
                         ("alarms", "repeat"), ("special_days", "on"), ("special_days", "holidays"),
                         ("special_days", "festive"), ("clock", "weather")):
         switch(group, name)
     number("background", "dim", 0, 0.8)
     number("background", "every", 1, 240)
     choice("weather", "units", ("auto", "celsius", "fahrenheit"))
+    choice("weather", "provider", ("", "openweather", "weatherapi"))
     choice("clock", "show", ("off", "idle", "always"))
     choice("clock", "hours", ("auto", "12", "24"))
     picked = (changes.get("background") or {}).get("choice")

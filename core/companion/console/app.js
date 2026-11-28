@@ -8,6 +8,7 @@ const KEY_NAMES = {
   fishaudio: "Fish Audio", inworld: "Inworld AI", minimax: "MiniMax", deepgram: "Deepgram",
   google_tts: "Google Cloud (voice)",
   search: "Web search", local_llm: "Your own model server",
+  openweather: "OpenWeather (weather)", weatherapi: "WeatherAPI.com (weather)",
 };
 const VOICE_LIST_PROVIDERS = new Set(["local", "elevenlabs", "cartesia", "fishaudio", "inworld", "minimax", "deepgram", "google"]);
 // Services where the voice alone says everything (no model to choose).
@@ -1628,7 +1629,7 @@ async function loadDay() {
     MONTHS.forEach((m, i) => $("day-bmonth").add(new Option(m, String(i + 1).padStart(2, "0"))));
   }
   $("day-bmonth").value = b.m; $("day-bday").value = b.d; $("day-byear").value = b.y;
-  $("day-weather").checked = !!weather.on;
+  $("day-wx-provider").value = weather.provider || "";
   $("day-units").value = weather.units || "auto";
   day.place = undefined;
   $("day-place-find").hidden = true;
@@ -1645,13 +1646,58 @@ async function loadDay() {
   $("day-every").value = String((s.background || {}).every || 10);
   renderWakeUps();
   renderDates();
+  keyStatus = await api("GET", "/api/keys");
+  shapeWeatherKey();
   showDayStatus(await api("GET", "/api/day"));
 }
+
+// The weather service's key, as on the AI services tab: where to get one, whether one is saved, a box to paste it.
+const WEATHER_HINTS = {
+  openweather: "Free: make an account at openweathermap.org, then copy your key from “My API keys”. A new key can take a " +
+    "couple of hours to start working. The free plan (a million calls a month) is far more than the device uses.",
+  weatherapi: "Free: sign up at weatherapi.com, then copy the API key from your dashboard. The free plan (100,000 calls a " +
+    "month) is far more than the device uses.",
+};
+
+function shapeWeatherKey() {
+  const provider = $("day-wx-provider").value;
+  const box = $("day-wx-key");
+  box.replaceChildren();
+  box.hidden = !provider;
+  if (!provider) return;
+  const hint = document.createElement("span"); hint.className = "hint"; text(hint, WEATHER_HINTS[provider] || "");
+  const saved = !!keyStatus[provider];
+  const status = document.createElement("span"); status.className = saved ? "ok" : "";
+  text(status, saved ? "Key saved ✓ " : "No key yet. ");
+  const input = document.createElement("input"); input.type = "password"; input.autocomplete = "off";
+  input.className = "key-input"; input.id = "day-wx-key-input";
+  input.placeholder = saved ? "paste a new key to replace it" : "paste the key here";
+  const save = button("Save key", async () => {
+    try {
+      keyStatus = await api("PUT", "/api/keys/" + provider, { value: input.value.trim() });
+      refreshKeys();
+      shapeWeatherKey();
+    } catch (e) { text(status, e.message + " "); }
+  });
+  save.id = "btn-day-wx-key";
+  box.append(hint, status, input, save);
+}
+$("day-wx-provider").addEventListener("change", shapeWeatherKey);
 
 function showDayStatus(st) {
   day.status = st;
   if (day.place === undefined) text($("day-place"), st.place ? st.place.label : "no town yet (the time zone has none): choose one");
-  text($("day-credit"), st.credit);
+  const credit = $("day-credit");
+  credit.replaceChildren();
+  const service = st.provider && st.providers[st.provider];
+  if (service) {
+    const link = document.createElement("a");
+    link.href = service.site; link.target = "_blank"; link.rel = "noopener";
+    text(link, service.credit);
+    credit.append(link, document.createTextNode(". "));
+  }
+  credit.append(document.createTextNode(st.credit));
+  if (st.problem && !$("day-weather-msg").textContent) text($("day-weather-msg"), "Problem: " + st.problem);
   showRinging(st.ringing);
   text($("day-next"), st.next_wake_up ? "Next wake-up: " + whenText(st.next_wake_up.at) +
     (st.next_wake_up.label && st.next_wake_up.label !== "wake-up" ? " (" + st.next_wake_up.label + ")" : "") + "." : "");
@@ -1748,7 +1794,7 @@ function dayChanges() {
   for (const w of day.wakeUps) if (!(w.days || [0]).length) throw new Error("each wake-up needs at least one day");
   const changes = {
     owner: { name: $("day-name").value.trim(), birthday: dateFrom($("day-bmonth"), $("day-bday"), $("day-byear"), "Your birthday") },
-    weather: { on: $("day-weather").checked, units: $("day-units").value },
+    weather: { provider: $("day-wx-provider").value, units: $("day-units").value },
     speak_first: { morning: $("day-morning").checked },
     alarms: { repeat: $("day-repeat").checked, wake_ups: day.wakeUps.map((w) => ({
       id: w.id || Math.random().toString(16).slice(2, 10), time: w.time || "07:00",
@@ -1808,13 +1854,12 @@ $("day-place-q").addEventListener("input", () => {
   }, 250);
 });
 $("btn-day-weather-check").addEventListener("click", async () => {
-  text($("day-weather-msg"), "Saving and asking MET Norway…");
+  text($("day-weather-msg"), "Saving and asking the weather service…");
   try {
-    $("day-weather").checked = true;
     await saveDay();
     const st = await api("POST", "/api/weather/check");
     showDayStatus(st);
-    text($("day-weather-msg"), st.problem || ("The character would say: " + st.weather_said));
+    text($("day-weather-msg"), st.weather_said ? "The character would say: " + st.weather_said : "Problem: " + st.problem);
   } catch (e) { text($("day-weather-msg"), e.message); }
 });
 $("btn-day-try-wake").addEventListener("click", async () => {
