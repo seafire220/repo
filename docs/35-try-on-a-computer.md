@@ -94,10 +94,15 @@ The same script, in a desktop session (the character needs a window), with Pytho
 
 ## Checked
 
-`.github/workflows/computer.yml` runs on a Mac (with Apple's own Python and openssl, as a Mac has after
-`xcode-select --install`) and on Linux, on every change to the core, the stage or the script: the
+`.github/workflows/computer.yml` runs on a Mac (with Apple's own Python, bash and openssl, as a Mac has
+after `xcode-select --install`) and on Linux, on every change to the core, the stage or the script: the
 script's own check (`--check`: it sets everything up, starts both halves, and checks that the settings
 page and the phone's page answer and the screen's program draws), the live camera's certificate, and the
 stage drawing a picture with desktop OpenGL (`stage/tools/smoke_test.py`), the only kind a Mac has. The
 stage asks for an OpenGL 3.3 core context there (`stage/src/window.rs`), as a Mac requires, and all its
 shaders put their version line first.
+
+First results, 2026-11-28, on GitHub's Mac (Apple silicon): the first run found the stage would not build
+on a Mac at all (the window library, winit 0.29, depends on a Mac library current Rust refuses); the
+stage moved to winit 0.30. Then everything passed: Python 3.9.6, OpenGL 4.1, the certificate made with
+LibreSSL 3.3.6 naming the computer's address, and the stage drawing with no shader errors.
