@@ -122,6 +122,8 @@ software is used.
 33. [What else would make it complete and polished](docs/33-finishing.md)
 34. [Licences: what we use, what each licence asks, what is left for a lawyer](docs/34-licences.md)
 35. [Trying the device's software on a computer, with a phone](docs/35-try-on-a-computer.md)
+36. [What else would make it complete: second review (with comparable products)](docs/36-polish-review.md)
+37. [Running on a cheap Android TV box: an assessment](docs/37-android-tv-box.md)
 - [Decision log](docs/decision-log.md)
 
 ## Known gaps
