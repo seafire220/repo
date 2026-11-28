@@ -56,6 +56,16 @@ The AI services buyers connect (OpenAI, Anthropic, ElevenLabs, Tavily and others
 buyer's own key and account, under the terms the buyer accepts with each service; the device does not
 resell them.
 
+## On the TV box variant (tvbox/README.md)
+
+The same software as the Pi device, on a different operating system: what differs is listed here.
+
+| Part | Licence | What it asks of us | Where that is done |
+|---|---|---|---|
+| The operating system: the community Armbian image for S905X3 boxes (github.com/ophub/amlogic-s9xxx-armbian; Debian 13 packages, and Armbian's own) | Each package's own, as on the Pi; the project's scripts GPL-2.0 | As on the Pi: the licence texts, and the source code of GPL and LGPL packages | *Licences and notices* shows every package's copyright file. **Not done yet**: a source-code release for the box image (the Pi image's job, `device/fetch-sources.py`, does not yet run for it) |
+| The box's Linux kernel and boot loader (U-Boot), from the community project (github.com/ophub/kernel, built from unifreq's kernel sources) | GPL-2.0 | Their **source code** with the device, at the exact versions shipped | **Before selling**: publish them with the box image's release (tvbox/README.md, "Before selling") |
+| Weston (the screen's kiosk) and v4l-utils (HDMI-CEC) | MIT; GPL-2.0 and LGPL-2.1 | Licence texts; source (with the operating system's) | Operating-system packages, as above |
+
 ## In Character Studio (the laptop app)
 
 | Part | Licence | What it asks of us | Where that is done |

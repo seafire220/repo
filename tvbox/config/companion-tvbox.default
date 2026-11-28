@@ -1,0 +1,15 @@
+# --- TV box (added by tvbox/install.sh; tvbox/README.md) ---
+# The button: the remote's OK, the TV remote's Select (through HDMI-CEC, if turned on below), Enter on a USB
+# button or keyboard, the keypad's Enter, Play/Pause; on any input device that has one of them.
+COMPANION_BUTTON=any
+COMPANION_BUTTON_KEYS=352,353,28,96,164
+# The remote's volume keys change the volume, and its mute key turns the microphone off or on.
+COMPANION_REMOTE_KEYS=1
+# No USB connection to a computer: the box's USB ports are for the microphone, speaker and button.
+COMPANION_USB=off
+# Sound: a USB speaker and microphone (the ReSpeaker Lite) is found by itself. For the TV's own speakers
+# (HDMI) with a USB microphone, remove the # (the card's name is in "aplay -l"):
+#COMPANION_ALSA_PLAYBACK=plughw:CARD=X96MAX
+# The TV's own remote through HDMI-CEC (its OK button as the device's button), with TVs that allow it:
+#COMPANION_CEC=on
+# --- end of TV box settings ---

@@ -1,0 +1,24 @@
+#!/bin/sh
+# The TV box's own sound card (Amlogic's: "X96MAX" on an X96 Max Plus) to the TV over HDMI. Its routes start
+# switched off; these are the settings other Amlogic S905X3 systems use. Run once at each start by
+# companion-tvbox-sound.service. Harmless without that card: a USB speaker and microphone are used first anyway.
+CARDS="${COMPANION_ASOUND_CARDS:-/proc/asound/cards}"
+CARD="$(sed -n 's/^ *[0-9][0-9]* \[\([^] ]*\) *\]: axg-sound-card.*/\1/p' "$CARDS" 2>/dev/null | head -n 1)"
+if [ -z "$CARD" ]; then
+    echo "no Amlogic sound card: nothing to do"
+    exit 0
+fi
+set_control() {
+    if [ -n "${COMPANION_DRY_RUN:-}" ]; then
+        echo "amixer -c $CARD sset '$1' '$2'"
+    else
+        amixer -q -c "$CARD" sset "$1" "$2" 2>/dev/null || echo "note: $CARD has no control '$1'"
+    fi
+}
+set_control 'FRDDR_A SRC 1 EN' on
+set_control 'FRDDR_A SINK 1 SEL' 'OUT 1'
+set_control 'TDMOUT_B SRC SEL' 'IN 0'
+set_control 'TOHDMITX I2S SRC' 'I2S B'
+set_control 'TOHDMITX' on
+echo "sound card $CARD sends its sound to HDMI"
+exit 0

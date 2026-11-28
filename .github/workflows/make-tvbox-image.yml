@@ -1,0 +1,231 @@
+# Builds a ready-to-flash card image of the device for a TV box: an Amlogic S905X3 box such as the X96 Max Plus
+# (tvbox/README.md). Run it from the Actions tab: "Make a TV box image" -> "Run workflow". About half an hour.
+#
+# It starts from the community Armbian image for S905X3 boxes (github.com/ophub/amlogic-s9xxx-armbian's monthly
+# releases), checked against the checksum GitHub keeps for it, and installs the device's software inside with
+# tvbox/install.sh. The Raspberry Pi image ("Make a device image") is not touched.
+#
+# The image goes on a GitHub release, "TV box image <version>" (tag tvbox-image-<version>): a draft only you can
+# see until you publish it. These are test images: not for sale until tvbox/README.md's "Before selling" is
+# done (power-cut protection, and the source code of the box's operating system, kernel and boot loader).
+name: Make a TV box image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The software's version in the image: numbers with dots, such as 2026.11.28"
+        required: true
+        type: string
+      board:
+        description: "Which box (tvbox/boards.tsv). Not sure? Gigabit X96 Max Plus; the 100 Mbit kind can be chosen later on the card"
+        required: true
+        default: x96-max-plus
+        type: choice
+        options: [x96-max-plus, x96-max-plus-100m, x96-max-plus-ip1001m, x96-max-plus-a100, x96-max-plus-2101,
+                  x96-max-plus-q1, x96-max-plus-q2, x96-air-gbit, x96-air, hk1-box, h96-max-x3, ugoos-x3, tx3,
+                  tx3-100m, a95x-f3-air, x88-pro-x3]
+      armbian_release:
+        description: "The community Armbian release to start from (a tag of ophub/amlogic-s9xxx-armbian)"
+        required: true
+        default: Armbian_trixie_arm64_server_2026.11
+        type: string
+      kernel:
+        description: "Its Linux kernel series"
+        required: true
+        default: "6.12"
+        type: string
+      ssh_public_key:
+        description: "For testing only: a public key (ssh-ed25519 AAAA...) that may log in as root over SSH. Leave empty for an image to sell"
+        required: false
+        default: ""
+        type: string
+      release:
+        description: "The GitHub release: a draft to check first, published at once, or none (Artifacts only)"
+        required: true
+        default: draft
+        type: choice
+        options: [draft, publish, none]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    permissions:
+      contents: write          # for the release; the token is given to that step only
+    steps:
+      - name: Check the inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          KERNEL: ${{ inputs.kernel }}
+          TAG: ${{ inputs.armbian_release }}
+          KEY: ${{ inputs.ssh_public_key }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){0,4}$'; then
+            echo "::error::A version is numbers with dots, such as 2026.11.28"; exit 1
+          fi
+          if ! printf '%s' "$KERNEL" | grep -Eq '^[0-9]+\.[0-9]+$'; then
+            echo "::error::A kernel series is two numbers with a dot, such as 6.12"; exit 1
+          fi
+          if ! printf '%s' "$TAG" | grep -Eq '^Armbian_[a-z]+_arm64_[a-z]+_[0-9.]+$'; then
+            echo "::error::The Armbian release is a tag such as Armbian_trixie_arm64_server_2026.11"; exit 1
+          fi
+          if [ -n "$KEY" ] && ! printf '%s' "$KEY" | grep -Eq '^(ssh-(ed25519|rsa)|ecdsa-sha2-[a-z0-9-]+) [A-Za-z0-9+/=]+( [^ ]*)?$'; then
+            echo "::error::The SSH key must be one public key line, such as ssh-ed25519 AAAA... you@laptop"; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q mtools xz-utils file
+          if command -v rustup >/dev/null; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          else
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Build the screen program
+        run: cd stage && cargo build --release
+
+      - name: Check the screen program's licence list matches its libraries
+        run: python3 stage/tools/notices.py --check
+
+      - name: Find the Armbian image for S905X3 boxes
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.armbian_release }}
+          KERNEL: ${{ inputs.kernel }}
+        run: |
+          gh api "repos/ophub/amlogic-s9xxx-armbian/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$KERNEL" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, re, sys
+          release, kernel = json.load(open(sys.argv[1])), sys.argv[2]
+          pattern = re.compile(r"^Armbian_[0-9.]+_amlogic_s905x3_trixie_%s\.[0-9]+_server_[0-9.]+\.img\.gz$" % re.escape(kernel))
+          found = sorted((a for a in release.get("assets", []) if pattern.match(a["name"])), key=lambda a: a["name"])
+          if not found:
+              names = [a["name"] for a in release.get("assets", []) if "s905x3" in a["name"]]
+              sys.exit("no S905X3 trixie image with kernel %s in this release; it has: %s" % (kernel, ", ".join(names) or "none"))
+          asset = found[-1]
+          print("name=%s" % asset["name"])
+          print("url=%s" % asset["browser_download_url"])
+          print("digest=%s" % (asset.get("digest") or ""))
+          PY
+          cat "$GITHUB_OUTPUT"
+
+      - name: Download it, and check it is the file GitHub has
+        env:
+          NAME: ${{ steps.find.outputs.name }}
+          URL: ${{ steps.find.outputs.url }}
+          DIGEST: ${{ steps.find.outputs.digest }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/$NAME" "$URL"
+          if [ -n "$DIGEST" ]; then
+            echo "${DIGEST#sha256:}  $RUNNER_TEMP/$NAME" | sha256sum -c -
+          else
+            echo "::warning::GitHub gave no checksum for $NAME"
+            sha256sum "$RUNNER_TEMP/$NAME"
+          fi
+
+      - name: Build the image
+        env:
+          VERSION: ${{ inputs.version }}
+          BOARD: ${{ inputs.board }}
+          NAME: ${{ steps.find.outputs.name }}
+          KEY: ${{ inputs.ssh_public_key }}
+        run: |
+          extra=()
+          if [ -n "$KEY" ]; then
+            printf '%s\n' "$KEY" > "$RUNNER_TEMP/maker-key.pub"
+            extra=(--ssh-key "$RUNNER_TEMP/maker-key.pub")
+          fi
+          sudo ./tvbox/build-image.sh "$RUNNER_TEMP/$NAME" "$RUNNER_TEMP/companion-tvbox-$VERSION-$BOARD.img" \
+              --version "$VERSION" --board "$BOARD" --stage-binary stage/target/release/stage "${extra[@]}"
+          sudo rm -f "$RUNNER_TEMP/$NAME"
+
+      - name: Check the image
+        env:
+          VERSION: ${{ inputs.version }}
+          BOARD: ${{ inputs.board }}
+          KEY: ${{ inputs.ssh_public_key }}
+        run: |
+          extra=()
+          if [ -n "$KEY" ]; then extra=(--with-ssh-key); fi
+          sudo ./tvbox/check-image.sh "$RUNNER_TEMP/companion-tvbox-$VERSION-$BOARD.img" --board "$BOARD" "${extra[@]}"
+
+      - name: Compress it
+        env:
+          VERSION: ${{ inputs.version }}
+          BOARD: ${{ inputs.board }}
+        run: |
+          cd "$RUNNER_TEMP"
+          sudo chown "$(id -u):$(id -g)" "companion-tvbox-$VERSION-$BOARD.img"
+          xz -T0 "companion-tvbox-$VERSION-$BOARD.img"
+          sha256sum "companion-tvbox-$VERSION-$BOARD.img.xz" > "companion-tvbox-$VERSION-$BOARD.img.xz.sha256"
+          ls -l "companion-tvbox-$VERSION-$BOARD.img.xz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-tvbox-image-${{ inputs.version }}-${{ inputs.board }}
+          path: |
+            ${{ runner.temp }}/companion-tvbox-${{ inputs.version }}-${{ inputs.board }}.img.xz
+            ${{ runner.temp }}/companion-tvbox-${{ inputs.version }}-${{ inputs.board }}.img.xz.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Put the image on a release
+        if: inputs.release != 'none'
+        env:
+          VERSION: ${{ inputs.version }}
+          BOARD: ${{ inputs.board }}
+          MODE: ${{ inputs.release }}
+          BASE: ${{ steps.find.outputs.name }}
+          DIGEST: ${{ steps.find.outputs.digest }}
+          TAG_BASE: ${{ inputs.armbian_release }}
+          KEY: ${{ inputs.ssh_public_key }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          file="companion-tvbox-$VERSION-$BOARD.img.xz"
+          if [ "$(stat -c %s "$file")" -ge 2147483648 ]; then
+            echo "::error::The image is 2 GB or more, which is more than a GitHub release file can be. It is under Artifacts."
+            exit 1
+          fi
+          access="No remote login: nobody can log in to it."
+          if [ -n "$KEY" ]; then access="**A test image**: the SSH key given when it was built may log in as root (and only that key)."; fi
+          cat > notes.md <<EOF
+          Card image of the device for TV boxes with the Amlogic S905X3 chip, software version $VERSION
+          (tvbox/README.md). **A test image: not for sale yet** (tvbox/README.md, "Before selling").
+
+          **companion-tvbox-$VERSION-$BOARD.img.xz**: for the $BOARD (tvbox/boards.tsv). Write it to a microSD card
+          with balenaEtcher or Raspberry Pi Imager ("Use custom"), then start the box from the card: tvbox/README.md,
+          "Starting the box from the card". Its checksum is in the .sha256 file. $access
+
+          Made from $BASE (release $TAG_BASE of github.com/ophub/amlogic-s9xxx-armbian, checksum ${DIGEST:-not given}).
+          EOF
+          tag="tvbox-image-$VERSION"
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$tag\") | \"\\(.id) \\(.draft)\"" | head -n 1)"
+          if [ -n "$existing" ] && [ "${existing#* }" != true ]; then
+            echo "::error::$tag is already published: give this build a new version."
+            exit 1
+          fi
+          if [ -n "$existing" ]; then
+            # Another board's image of this version is already on the draft: add this one beside it.
+            gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$file" "$file.sha256"
+          else
+            flags="--draft"
+            if [ "$MODE" = publish ]; then flags=""; fi
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+                --title "TV box image $VERSION" --notes-file notes.md --latest=false $flags "$file" "$file.sha256"
+          fi
+          echo "### TV box image $VERSION for $BOARD: release $tag ($MODE)" >> "$GITHUB_STEP_SUMMARY"

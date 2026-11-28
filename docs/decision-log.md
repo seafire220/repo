@@ -1122,3 +1122,31 @@ rejected. Settled entries are not reopened without new evidence.
 - Rejected: **MET Norway** (no key to bring: the seller would be its user); **Open-Meteo** (its free service has
   no keys; its keys are for paid plans); **more services** for now (Tomorrow.io, Visual Crossing, Pirate Weather:
   easy to add the same way if buyers ask).
+
+## D-076 — A TV box variant: Linux on the box, in its own folder
+
+- Date: 2026-11-28
+- Decision: the owner asked for a variant for an Android TV box (the X96 Max Plus, S905X3), in a separate folder,
+  keeping the Raspberry Pi device as it is. Built as `37-android-tv-box.md` recommended (way A): the box starts
+  Linux from a card (the community Armbian image for S905X3 boxes, Debian 13 like the Pi image), and runs the same
+  `core/` and `stage/`. Everything the box needs instead is in `tvbox/`: its installer (which runs
+  `device/install.sh`, unchanged, then the box's parts), card-image builder and checker, the boxes' device-tree
+  list, and a workflow (`make-tvbox-image.yml`) beside the Pi's.
+  - **The screen**: Weston's kiosk shell instead of cage, at 1920x1080 whatever the TV would like (a 4K picture is
+    four times the work for the Mali-G31; cage cannot choose the mode), with no blanking. A systemd drop-in, which
+    updates leave alone; the character's program gets the screen service's own arguments from its unit file.
+  - **The button**: any input device with OK, Select, Enter, the keypad's Enter or Play/Pause (the box's remote
+    through the kernel's own X96 key map, a USB button or keyboard, the TV's remote through HDMI-CEC once turned
+    on); the remote's volume and mute keys; devices plugged in later are found. `core/companion/__main__.py`, by
+    settings in `/etc/default/companion`; the Pi's behaviour is unchanged.
+  - **Sound**: USB first, as on the Pi; else the box's own card, routed to HDMI at each start.
+  - **The address on an Ethernet cable** is now shown on the setup screen (shared: the Pi's Ethernet benefits too).
+  - **Security**: the community images come with root/1234 and SSH on; the box image locks root and turns SSH
+    off, unless a maker's public key is given for a test image.
+- Why: a box costs less than a Pi with its case, power supply and storage, and brings Wi-Fi and Ethernet; way A
+  keeps one software for both (an Android app would be a second product, `37`). A separate folder keeps the Pi's
+  build and checks exactly as they were.
+- Not yet: power-cut protection on the box, the source-code release for its kernel and boot loader, and a run on a
+  real box (T1 to T10 in `15-hardware-test-plan.md`).
+- Rejected: copying `core/` and `stage/` into the folder (two copies would drift apart; a fix to memory or a
+  character would have to be made twice); cage with a 4K picture; an Android app (for now).

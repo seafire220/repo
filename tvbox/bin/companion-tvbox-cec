@@ -1,0 +1,14 @@
+#!/bin/sh
+# The TV's own remote, through HDMI-CEC: the box tells the TV it is a player called "Companion", and answers the
+# TV as a player does, so the TV sends its remote's keys while the box's input is showing (its OK button is
+# then the device's button). Only with COMPANION_CEC=on in /etc/default/companion: TVs differ, and some
+# switch their input to the box when it announces itself. Run by companion-tvbox-cec.service.
+case "${COMPANION_CEC:-off}" in
+    on|yes|1) ;;
+    *) echo "HDMI-CEC not turned on (COMPANION_CEC=on in /etc/default/companion)"; exec sleep infinity ;;
+esac
+DEV="${COMPANION_CEC_DEVICE:-/dev/cec0}"
+command -v cec-ctl >/dev/null || { echo "cec-ctl is not installed"; exec sleep infinity; }
+cec-ctl -d "$DEV" --playback --osd-name "Companion" || exit 1
+# cec-follower answers the TV's questions (its name, its power state, which input it is on) as a player does.
+exec cec-follower -d "$DEV"

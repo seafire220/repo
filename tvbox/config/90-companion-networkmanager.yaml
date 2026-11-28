@@ -1,0 +1,4 @@
+# NetworkManager looks after every network connection, as the device's Wi-Fi setup expects (tvbox/install.sh).
+network:
+  version: 2
+  renderer: NetworkManager

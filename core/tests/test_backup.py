@@ -128,6 +128,8 @@ class SupportTest(unittest.TestCase):
             for private in (b"Wilhelmina", b"1990-03-17", b"Tumbleton", b"56.78", b"our wedding day", b"gym with Jo"):
                 self.assertNotIn(private, everything, "the owner's name, birthday, town and own days are left out")
             self.assertEqual(report["settings"]["owner"], {"name": True, "birthday": True})
+            self.assertEqual(set(report["hardware"]), {"sound_cards", "inputs", "network", "wifi_driver", "screen",
+                                                       "frame_rate", "tv_box"})
             self.assertEqual(report["settings"]["alarms"]["wake_ups"][0]["time"], "06:45")
 
 

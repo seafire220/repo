@@ -1158,6 +1158,26 @@ class Device:
             self.overlays.hide(HINT)
             asyncio.ensure_future(self.setup_reset())
 
+    # ----- a remote's keys (a TV box: tvbox/README.md)
+    def change_volume(self, step):
+        """A remote's volume key: the sound a step louder or quieter, kept, and shown on the screen."""
+        volume = round(min(1.0, max(0.0, float(self.store.settings().get("volume", 0.8)) + step)), 2)
+        self.store.update_settings({"volume": volume})
+        self.speaker.volume = volume
+        self.activity()
+        self.overlays.hint("Volume %d%%" % round(volume * 100), seconds=1.5)
+        self.emit("device", {"volume": volume})
+        return volume
+
+    def toggle_microphone(self):
+        """A remote's mute key: the microphone off or on, as holding the button does."""
+        self.activity()
+        if self.mic_switch:
+            self.overlays.hint("The mute switch is on: slide it to turn the microphone on", seconds=4.0)
+            return
+        self.set_muted(not self._mute_choice)
+        self.overlays.hint("Microphone off" if self.muted else "Microphone on", seconds=2.0)
+
     # ----- the microphone off (docs/28-user-guide.md)
     @property
     def muted(self):

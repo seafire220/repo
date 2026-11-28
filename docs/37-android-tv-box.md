@@ -1,6 +1,8 @@
 # Running on a cheap Android TV box: an assessment
 
-Status: 2026-11-28. Assessment only; nothing is built (the owner: "don't do this yet").
+Status: 2026-11-28. Assessment first ("don't do this yet"); then the owner asked for the variant, and it is
+**built** the recommended way (A, below) in its own folder: [`tvbox/README.md`](../tvbox/README.md) (D-076).
+Not yet tried on a box: the hardware tests are T1 to T10 in `15-hardware-test-plan.md`.
 
 ## The short answer
 

@@ -70,6 +70,24 @@ Tests 34 to 36 can also be done before the device is built, with a Mac or a Linu
 | 39 | Your day | Your day tab: your name, a town, a weather service with your own key (try OpenWeather and WeatherAPI.com, and a wrong key), the clock *while nobody is talking*; a wake-up two minutes from now; *Try one now*; then the real wake-up, unanswered, from the next room; then again, answered with "five more minutes"; pull the network cable before one; set the date to 25 December (or a birthday) | *Save and check the weather* gives today's weather with either service, and says plainly when the key is wrong; the clock is readable from 2 m and steps aside while you talk; the wake-up says your name, the time and the weather in the character's voice, calls five times a minute apart, louder each time (note whether the last is loud enough to wake someone in the next room), and the button stops it at once; "five more minutes" sets a timer; with no network it still says set words in the device's own voice; on the special day it says so the first time you talk, and the festive background shows all day |
 | 40 | Good morning | Speak first on; talk last thing at night; come into the room the next morning | It says good morning with the weather and your plans, once, then listens |
 
+## TV box (tvbox/README.md)
+
+For an S905X3 TV box (the X96 Max Plus first) started from a card made by "Make a TV box image". Build the test
+image with your SSH public key, so `check-on-box.sh` can be run; the support report has most of the same facts.
+
+| # | Test | How | Pass |
+|---|---|---|---|
+| T1 | Starting from the card | The toothpick method (tvbox/README.md); time it | The setup screen within five minutes, every time from then on (and Android again with the card out) |
+| T2 | The picture | A 1080p TV, a 4K TV, a small monitor; the monitor on its side with `transform=rotate-90` | 1920x1080 on each (the support report's *screen*); nothing cut off with the TV's *Just Scan*; the tall picture when turned |
+| T3 | Ethernet | Plug in a cable before starting | The setup screen shows the address; the settings page opens. If not, change `FDT=` to the other X96 Max Plus file and note which your box needed |
+| T4 | Wi-Fi | Start with no cable | Note the support report's *wifi_driver*; whether the setup hotspot opens, and whether joining a network works |
+| T5 | Graphics | A 2D character, then a 3D avatar, for ten minutes each; then thirty minutes of talking | Note the frame rate (Animation tab) and the temperature (support report): 30 frames a second or more for 2D, 20 or more for 3D on a light drawing |
+| T6 | Sound | The ReSpeaker Lite; then no USB speaker (the TV's speakers) | Clear speech both ways with the ReSpeaker; the voice from the TV without it (if not, send the support report: its *sound_cards*) |
+| T7 | The remote | OK: press, then hold two seconds; volume up and down, held; mute; a USB keyboard's Enter | Listening starts and stops; the microphone goes off and on; the volume steps about four times a second while held; note the remote's model |
+| T8 | The TV's remote (HDMI-CEC) | `COMPANION_CEC=on` in /etc/default/companion; restart; switch the TV to the box | Note whether the TV lists "Companion", and whether its OK button starts listening |
+| T9 | Switching off, and updates | The remote's power button; then plug in again. Install an update file (Device tab) | It switches off cleanly and starts again; after the update the picture is still 1920x1080 (the Weston drop-in is kept) |
+| T10 | A day of use | Leave it running a day with Your day's clock, a wake-up and the weather | No restarts of the screen in `journalctl -u companion-stage`; memory steady (support report); the wake-up rings |
+
 ## Things to measure and feed back
 
 - The sound card's ALSA name, and whether the ReSpeaker Lite's echo

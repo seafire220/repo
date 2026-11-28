@@ -48,6 +48,20 @@ def split_terse(line):
     return fields
 
 
+def outgoing_address():
+    """The address this machine would use on its home network (nothing is sent: this only picks the way out)."""
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("10.255.255.255", 1))
+        address = probe.getsockname()[0]
+        return "" if address.startswith("127.") or address == "0.0.0.0" else address
+    except OSError:
+        return ""
+    finally:
+        probe.close()
+
+
 class WiFi:
     def __init__(self, run=_run, interface="wlan0"):
         self.run = run
@@ -59,12 +73,17 @@ class WiFi:
         return out.strip().startswith("connected")
 
     async def address(self):
-        out = await self.run("nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", self.interface)
+        """The device's address on the home network: its Wi-Fi's, else the connection in use (an Ethernet
+        cable: a TV box, or a Pi with one)."""
+        try:
+            out = await self.run("nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", self.interface)
+        except NetworkError:
+            out = ""
         for line in out.splitlines():
             value = split_terse(line)[-1]
             if "/" in value:
                 return value.split("/")[0]
-        return ""
+        return outgoing_address()
 
     async def networks(self):
         await self.run("nmcli", "device", "wifi", "rescan", "ifname", self.interface, timeout=15)

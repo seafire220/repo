@@ -72,6 +72,32 @@ def facts(device):
         "active": device.active_id(),
         "updates": device.updates.status(),
         "state": device.state,
+        "hardware": hardware(device),
+    }
+
+
+def hardware(device, proc="/proc", sys_class="/sys/class", etc="/etc"):
+    """What the board has, for whoever helps with it (a TV box especially, tvbox/README.md): its sound cards, its
+    input devices (the button, a remote, a USB keyboard; a Bluetooth one is not named, as its name may be a
+    person's), its network devices and Wi-Fi driver, the screen's size and the character's frame rate."""
+    inputs = []
+    for block in _read(os.path.join(proc, "bus/input/devices")).split("\n\n"):
+        lines = block.splitlines()
+        name = next((l.split("=", 1)[1].strip('"') for l in lines if l.startswith("N: Name=")), "")
+        if not name:
+            continue
+        bluetooth = any(l.startswith("I: Bus=0005") for l in lines)
+        inputs.append("a Bluetooth device" if bluetooth else name[:60])
+    net = os.path.join(sys_class, "net")
+    driver = os.path.join(net, "wlan0", "device", "driver")
+    return {
+        "sound_cards": _read(os.path.join(proc, "asound/cards")).strip(),
+        "inputs": inputs,
+        "network": sorted(n for n in os.listdir(net) if n != "lo") if os.path.isdir(net) else [],
+        "wifi_driver": os.path.basename(os.path.realpath(driver)) if os.path.exists(driver) else "",
+        "screen": list(getattr(device.overlays, "screen", ()) or ()),
+        "frame_rate": (device.animation or {}).get("fps"),
+        "tv_box": _read(os.path.join(etc, "companion-tvbox")).strip(),
     }
 
 

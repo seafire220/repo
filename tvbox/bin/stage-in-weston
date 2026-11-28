@@ -1,0 +1,14 @@
+#!/bin/sh
+# The character on a TV box's screen, started by Weston's kiosk shell (/etc/companion/weston.ini). It runs the
+# screen program exactly as companion-stage.service does under cage on a Raspberry Pi, with the arguments read
+# from that file, so an update that changes them changes them here too.
+UNIT="${COMPANION_STAGE_UNIT:-/etc/systemd/system/companion-stage.service}"
+ARGS="$(sed -n 's/^ExecStart=.*[[:space:]]--[[:space:]]\{1,\}\(\/[^[:space:]].*\)$/\1/p' "$UNIT" 2>/dev/null | head -n 1)"
+[ -n "$ARGS" ] || ARGS="/opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin --map /var/lib/companion/current-map.json --settings /var/lib/companion/current-stage.json"
+if [ -n "${COMPANION_DRY_RUN:-}" ]; then
+    printf '%s\n' "$ARGS"
+    exit 0
+fi
+# The arguments are plain words with no spaces inside them, so the shell splits them as intended.
+# shellcheck disable=SC2086
+exec $ARGS

@@ -1,0 +1,14 @@
+[Unit]
+Description=Character device: the TV's own remote, through HDMI-CEC (when turned on)
+After=systemd-udev-settle.service
+ConditionPathExists=/dev/cec0
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/companion
+ExecStart=/usr/local/lib/companion-tvbox/companion-tvbox-cec
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

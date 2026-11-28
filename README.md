@@ -22,9 +22,10 @@ done and what comes next: [docs/21-roadmap.md](docs/21-roadmap.md).
 | [`core/`](core/) | The device's main program (Python): conversation, voices, speech recognition, memory, characters, alarms, Wi-Fi setup, updates, and the settings page you open in a browser | On the device |
 | [`stage/`](stage/README.md) | The screen program (Rust, OpenGL ES): draws and animates the character, with Inox2D for Inochi2D models, Ayagami for `.model3.json` models, and our own VRM renderer | On the device, built for the Pi's 64-bit ARM processor |
 | [`device/`](device/) | What turns Raspberry Pi OS into the device: the card-image builder (`build-image.sh`) and checker (`check-image.sh`), the installer (`install.sh`), system services and settings, the updater, the update-signing tool (`release.py`), and the operating system's source-code collector (`fetch-sources.py`) | The services, settings and updater go on the device; the tools run on GitHub or the owner's computer |
+| [`tvbox/`](tvbox/README.md) | The variant for a cheap TV box (an Amlogic S905X3 box, such as the X96 Max Plus): its installer, card-image builder and checker, and what a box needs instead of a Pi (the screen at 1920x1080 under Weston, the remote as the button). The same `core/` and `stage/` as the Pi | The box's parts go on a TV box; the Pi device (`device/`) is unchanged |
 | [`studio/`](studio/) | Character Studio, the app that makes a character from one picture and sends it to the device | On the buyer's computer (Windows, Mac or Linux), never on the device |
 | [`docs/`](docs/) | Design, guides, measurements and decisions (list below) | Nowhere: for reading |
-| [`.github/workflows/`](.github/workflows/) | The builds GitHub runs: the card image, updates, and the Character Studio apps | On GitHub |
+| [`.github/workflows/`](.github/workflows/) | The builds GitHub runs: the card image (and the TV box's), updates, and the Character Studio apps | On GitHub |
 | [`THIRD_PARTY.md`](THIRD_PARTY.md) | Every third-party part and its licence, in short ([docs/34-licences.md](docs/34-licences.md) in full) | Also on the device and in the app |
 
 ### What goes on the device
@@ -123,7 +124,7 @@ software is used.
 34. [Licences: what we use, what each licence asks, what is left for a lawyer](docs/34-licences.md)
 35. [Trying the device's software on a computer, with a phone](docs/35-try-on-a-computer.md)
 36. [What else would make it complete: second review (with comparable products)](docs/36-polish-review.md)
-37. [Running on a cheap Android TV box: an assessment](docs/37-android-tv-box.md)
+37. [Running on a cheap Android TV box: an assessment](docs/37-android-tv-box.md), and the variant built from it: [tvbox/README.md](tvbox/README.md)
 - [Decision log](docs/decision-log.md)
 
 ## Known gaps

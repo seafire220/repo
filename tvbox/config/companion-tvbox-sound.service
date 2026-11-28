@@ -1,0 +1,11 @@
+[Unit]
+Description=Character device: the TV box's own sound to the TV (HDMI)
+After=sound.target
+Before=companion-core.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/companion-tvbox/companion-tvbox-sound
+
+[Install]
+WantedBy=multi-user.target
