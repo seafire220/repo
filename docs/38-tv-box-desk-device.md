@@ -93,8 +93,9 @@ adapter before buying the lead (T17 checks for brown-outs at full volume).
 check that it is the HDMI one). 1024×600, **IPS** (it stays clear seen from the side when it stands on its side: a
 cheap TN screen does not), 164.9 × 107.0 × 8 mm, 2.5 W from its micro-USB socket, a backlight switch on the back,
 and USB touch (not used yet; it is there for touch reactions later). Waveshare publishes its timing (49 MHz,
-1024×600), which the box's HDMI can produce: the Linux driver for the box's display takes pictures 400 to 1920 wide
-and 480 to 1920 tall at clocks its PLL can make.
+1024×600), which the box's HDMI can produce: the Linux driver for the box's display (meson) takes modes at least
+400 wide and 480 tall (up to 3840×2160 in today's kernel) at any clock its PLL can make, and 49 MHz is one (the
+PLL at 3.92 GHz, within its range). The screen stays 1024×600 on the cable; the turn is made by Weston.
 
 - **Its own size, not 1080p.** The screen accepts a 1080p picture too, and before this change the box sent one
   (fixed at 1920x1080 for TVs), to be squeezed down. Now the box asks the screen for its own size and sends that,
