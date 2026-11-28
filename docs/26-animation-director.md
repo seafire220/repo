@@ -404,6 +404,59 @@ The owner can record a gesture with a phone, with no app and no computer
 The video stays on the phone. The device receives only the points, so a
 phone recording costs it no video decoding or model running at all.
 
+## The whole body, for 3D avatars
+
+Status: 2026-11-28. A 3D (VRM) character playing clips (the full style, `30-vrm.md`) is recorded whole:
+the phone records the whole body and the clip becomes one of the avatar's own animations (`core/companion/body_motion.py`).
+2D characters, and 3D ones in the light style, keep the head-and-arms gestures above.
+
+1. **On the phone.** The page is told the character is a 3D avatar (`/r/<code>/info`: `body`), says so
+   ("stand back so the camera sees you from head to feet"), and loads MediaPipe's larger pose model
+   (`pose_landmarker_full.task`, 9 MB, pinned like the others): its 3D points are steadier. With each
+   frame it sends the 33 body points as MediaPipe gives them in metres, centred between the hips (its
+   world landmarks), with how sure it is of each and where each is in the picture. The live camera says,
+   as you move, what it can see: *your whole body is in view*, *step back so your feet are in view too*,
+   or *your upper body is in view; step back to get your legs in too, or carry on*.
+2. **Bones, not controls.** Each frame becomes the turns of the avatar's bones in VRM's normalised
+   skeleton (x towards its left, y up, z towards the viewer, nothing turned in the T-pose): the hips from
+   the hip line and the spine, the waist's twist shared between the spine, chest and upper chest, the
+   neck and head from the ears and nose, each arm and leg from its three joints (the upper bone's direction
+   and the hinge its elbow or knee bends about; the lower bone bends only about that hinge), hands and feet
+   from their own points. Directions, not lengths, so it fits any avatar. The points are smoothed both
+   ways first (a recording has no need to lag), and the clip is written at 30 frames a second as a VRM
+   Animation file the stage plays like any other.
+3. **Only what was seen is kept** (the failsafes):
+   - A part of the body seen for less than half the time (both shoulders, the hips, the head, each arm,
+     hand, leg and foot) is left out of the clip. The stage then lets the avatar's own idle movement show
+     there: a clip moves only the bones it has. With the hips or legs out of the picture the clip is of
+     the upper body; with the face unseen the head is the avatar's own.
+   - The frames at either end without the shoulders are cut off. With the shoulders unseen most of the
+     time there is no whole-body clip; the device makes the head-and-arms gesture instead (above), saying
+     why, as for a 2D character.
+   - In a part that is kept, a gap of up to 0.6 seconds (out of the picture, or MediaPipe unsure) is
+     bridged smoothly; a longer one eases that part to a resting pose (arms down by the sides) and back.
+   - Elbows and knees bend only the way they can, and no further (150 and 160 degrees); a hinge that
+     turns right round from one frame to the next, as noise or a bend the wrong way would make it, keeps
+     the last one and stays straight. A nearly straight limb keeps its last hinge too, so noise cannot
+     twist it round. Hands and feet turn at most 60 and 45 degrees from the arm and leg, the head 75 from
+     the chest, the waist 60.
+   - With both legs kept, the hips go down as the knees bend, so the feet stay on the floor. Sideways
+     steps are not followed (a hand-held phone moves too), and the stage keeps the hips near their place.
+4. **On the screen, and kept.** The clip plays at once (`try_animation`); *Swap left and right* works it
+   out again mirrored. Kept, it is one of the avatar's own animations (`animations.py`): a new gesture
+   asked for by its words, or, after asking, in place of a built-in one of the same name. The phone says
+   what was kept and what was left to the avatar ("Kept: upper body, head, left arm, right arm. Left to
+   the avatar's own movement: left leg (not in the picture) ...").
+
+Tests: `core/tests/test_body_motion.py` (bodies posed on the reference skeleton, turned into what MediaPipe
+sends, solved back to within 2 cm; each failsafe by hiding parts of the body), the device's side in
+`test_phone_record.py` (`BodyWebTest`), and `core/tests/body_record_test.cjs`: a real MediaPipe run in a
+phone-sized browser on a video of a person, whose clip was kept whole-body and listed among the avatar's
+animations. The stage played the clips made (whole body, and upper body only) on a sample avatar.
+
+Not done: copying the whole body live (the live camera and the apps copy the head, face and arms);
+fingers (the pose model has no finger joints; a hand model would add them).
+
 ## Live from a phone ("Copy me", and the live camera)
 
 The character can copy a person as they move, from either of two sources,

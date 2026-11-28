@@ -21,7 +21,7 @@ import urllib.parse
 from aiohttp import web
 
 from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
-from . import live_motion, mocap_assets, phone_apps, phone_record, tls
+from . import body_motion, live_motion, mocap_assets, phone_apps, phone_record, tls
 from . import memory as memory_module
 from .memory import when
 from . import backup as backup_module
@@ -29,6 +29,7 @@ from . import support as support_module
 from . import updates as updates_module
 from .network import NetworkError
 from .providers import ProviderError
+from .store import write_atomic
 from .stage_link import CONTROL_NAMES, CONTROLS
 
 SESSION_COOKIE = "companion_session"
@@ -1145,6 +1146,7 @@ class Console:
             return {"active": False}
         assets = self._mocap_state()
         return {"active": True, "state": session["state"], "moves": session.get("moves") or [],
+                "whole_body": bool(session.get("body_clip")),
                 "seconds": session.get("seconds"), "saved": list(session.get("saved") or []),
                 "expires_in": max(0, int(session["expires"] - time.time())), "assets": assets,
                 "assets_message": self.mocap_error if assets == "failed" else ""}
@@ -1273,9 +1275,14 @@ class Console:
             character = self.device.characters.manifest(cid).get("name", "") if cid else ""
         except (OSError, ValueError):
             character = ""
+        body = bool(cid) and self._body_wanted(cid)
         return web.json_response({"assets": status["assets"], "assets_message": status["assets_message"],
                                   "expires_in": status["expires_in"], "max_seconds": phone_record.MAX_SECONDS,
-                                  "character": character, "layout": phone_record.LAYOUT})
+                                  "character": character, "layout": phone_record.LAYOUT,
+                                  # A 3D avatar moving all its bones: the whole body is recorded, with the
+                                  # larger pose model (its 3D points are steadier).
+                                  "body": body,
+                                  "pose_model": "pose_landmarker_full.task" if body else "pose_landmarker_lite.task"})
 
     async def record_asset(self, request):
         name = request.match_info["name"]
@@ -1291,10 +1298,51 @@ class Console:
         response.headers["Cache-Control"] = "no-cache"
         return response
 
+    def _body_wanted(self, cid):
+        """Whether a recording for this character is of the whole body: a 3D avatar playing clips."""
+        try:
+            return (self.device.characters.drawing(cid) == "vrm"
+                    and self.device.animations.settings(cid)["animation"] == "full")
+        except (OSError, ValueError, KeyError):
+            return False
+
+    def _try_body(self, data):
+        """Play a whole-body clip once on the screen, without keeping it."""
+        path = os.path.join(self.device.data_dir, "phone-body.vrma")
+        write_atomic(path, data)
+        return self.device.stage.send({"try_animation": path}) is not False
+
+    async def _record_body(self, session, body, cid):
+        """A whole-body clip from the phone's 3D points, played on the screen at once. Raises BodyError when
+        too little of the body was seen."""
+        mirror = bool(body.get("mirror"))
+        data, report = await asyncio.get_running_loop().run_in_executor(None, body_motion.make, body, mirror)
+        said = body_motion.describe(report)
+        session.update(body=body, body_clip=data, body_report=report, body_said=said, body_cid=cid,
+                       tracks=None, moves=[said], seconds=report["seconds"], state="ready")
+        played = self._try_body(data)
+        self._record_changed()
+        return web.json_response({"ok": True, "whole_body": True, "scope": report["scope"], "said": said,
+                                  "report": report, "moves": [said], "seconds": report["seconds"],
+                                  "played": played, "can": True})
+
     async def record_motion(self, request):
-        """The landmarks of a filmed gesture: made into a clip, played on the screen at once."""
+        """The landmarks of a filmed gesture: made into a clip, played on the screen at once. For a 3D avatar
+        playing clips, the whole body (body_motion.py); if too little of the body was seen for that, the
+        face and arms as for any character, saying why."""
         session = self._phone_session(request)
         body = await self._phone_json(request)
+        cid = self.device.active_id()
+        note = ""
+        if cid and self._body_wanted(cid) and any(isinstance(f, dict) and f.get("body")
+                                                  for f in body.get("frames") or []):
+            try:
+                return await self._record_body(session, body, cid)
+            except body_motion.BodyError as error:
+                note = "Not enough of your body was seen for a whole-body movement (%s), so this is your head, " \
+                       "face and arms." % error
+        for key in ("body", "body_clip", "body_report", "body_said", "body_cid"):
+            session.pop(key, None)
         try:
             tracks, moves = await asyncio.get_running_loop().run_in_executor(None, phone_record.make_clip, body)
         except ValueError as error:
@@ -1305,12 +1353,24 @@ class Console:
         played = self._try_on_screen(motions.clean(motions.TRY, entry), character=True)
         self._record_changed()
         return web.json_response({"ok": True, "moves": moves, "seconds": seconds, "played": played,
-                                  "can": self._can_make(entry)})
+                                  "can": self._can_make(entry), "note": note})
 
     async def record_play(self, request):
         """Play the gesture again (swapped left for right, if asked)."""
         session = self._phone_session(request)
         body = await self._phone_json(request)
+        if session.get("body_clip"):
+            # The whole body again, worked out afresh if it is to be swapped left for right.
+            if bool(body.get("mirror")) != bool(session["body"].get("mirror")):
+                session["body"] = dict(session["body"], mirror=bool(body.get("mirror")))
+                try:
+                    data, report = await asyncio.get_running_loop().run_in_executor(
+                        None, body_motion.make, session["body"], bool(body.get("mirror")))
+                except body_motion.BodyError as error:
+                    raise web.HTTPBadRequest(text=str(error))
+                session.update(body_clip=data, body_report=report, body_said=body_motion.describe(report))
+            return web.json_response({"ok": True, "played": self._try_body(session["body_clip"]), "can": True,
+                                      "said": session["body_said"]})
         if not session.get("tracks"):
             raise web.HTTPConflict(text="send a gesture first")
         entry = phone_record.entry(session["tracks"], bool(body.get("mirror")))
@@ -1321,6 +1381,8 @@ class Console:
         """Keep the gesture with the others, under the name the phone gave it."""
         session = self._phone_session(request)
         body = await self._phone_json(request)
+        if session.get("body_clip"):
+            return await self._save_body(session, body)
         if not session.get("tracks"):
             raise web.HTTPConflict(text="send a gesture first")
         name = phone_record.gesture_name(body.get("name"))
@@ -1341,6 +1403,36 @@ class Console:
         session["saved"] = list(session.get("saved") or []) + [name]
         self._record_changed()
         return web.json_response({"ok": True, "name": name, "kind": kind, "replaced": origin})
+
+    async def _save_body(self, session, body):
+        """Keep a whole-body clip as the 3D avatar's own animation (animations.py): a new gesture asked for by
+        its words, or in place of one it has (after asking)."""
+        cid = session.get("body_cid")
+        if cid != self.device.active_id():
+            raise web.HTTPConflict(text="the character it was recorded for is no longer on the screen")
+        name = phone_record.gesture_name(body.get("name"))
+        words = " ".join(str(body.get("words") or "").replace("[", " ").replace("]", " ").split())[:80]
+        gestures = self._stage_gestures()
+        if name in self.device.animations.index(cid):
+            origin = "added"
+        elif name in gestures or name in animations.builtin_names():
+            origin = "built in"
+        else:
+            origin = None
+        if origin and not body.get("replace"):
+            return web.json_response({"exists": origin, "name": name}, status=409)
+        try:
+            entry = self.device.animations.add(cid, name, session["body_clip"], title=name.replace("_", " "),
+                                               words=words or None, gestures=gestures)
+        except animations.AnimationError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.emit("animation_added", {"id": cid, "role": name})
+        self._restage(cid)
+        session["state"] = "saved"
+        session["saved"] = list(session.get("saved") or []) + [name]
+        self._record_changed()
+        return web.json_response({"ok": True, "name": name, "kind": entry.get("kind"), "replaced": origin,
+                                  "whole_body": True})
 
     # ----- "Copy me": the character moves as a person does, live (live_motion.py)
     def _live_changed(self):

@@ -343,6 +343,14 @@ press **Start the camera** (and allow the camera), then **Record a
 gesture** (it counts three; press **Stop** when done), or **Copy me on the
 screen**. *Or film with the camera app* is still there.
 
+**A 3D character records your whole body.** For a 3D (VRM) character the phone records your whole
+body: stand back so the camera sees you from head to feet (a phone propped up works best). If only your
+top half is in the picture, that is fine: its legs keep their own movement. After it reads the movement,
+the phone tells you what it kept and what it left to the character (a leg that was out of the picture,
+say). If it could not see your shoulders for most of the recording, it makes a head-and-arms gesture
+instead and says why. Kept movements appear under the character's **3D animation** on the settings page,
+where you can try or remove them.
+
 ### Copy me live
 
 The character copies your face as you move (your head, eyes, brows, smile

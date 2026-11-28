@@ -231,7 +231,7 @@ class AssetsTest(unittest.TestCase):
     def test_the_pinned_files_are_the_ones_the_phone_asks_for(self):
         self.assertEqual(set(mocap_assets.FILES), {"vision_bundle.mjs", "vision_wasm_internal.js",
                                                    "vision_wasm_internal.wasm", "face_landmarker.task",
-                                                   "pose_landmarker_lite.task"})
+                                                   "pose_landmarker_lite.task", "pose_landmarker_full.task"})
         for url, member, digest in mocap_assets.FILES.values():
             self.assertTrue(url.startswith("https://"))
             self.assertRegex(digest, "^[0-9a-f]{64}$")
@@ -461,6 +461,100 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status["assets"], "ready")
             r = await self.client.get("/r/assets/face_landmarker.task")
             self.assertEqual(await r.read(), contents["face_landmarker.task"])
+
+
+
+class BodyWebTest(unittest.IsolatedAsyncioTestCase):
+    """A 3D avatar playing clips: the phone's recording is of the whole body (body_motion.py), kept as the
+    avatar's own animation; too little of the body seen gives the head-and-arms gesture instead."""
+
+    async def asyncSetUp(self):
+        from vrm_sample import sample_vrm
+        self.dir = tempfile.TemporaryDirectory()
+        self.stage = FakeStage()
+        self.device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=self.stage,
+                             provider_factory=lambda which, device: None)
+        self.cid = self.device.characters.install(package.from_vrm(sample_vrm(1)))
+        self.device.activate(self.cid)
+        folder = os.path.join(self.dir.name, "models", "mocap")
+        os.makedirs(folder)
+        for name in mocap_assets.FILES:
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(b"stand-in " + name.encode())
+        self.client = TestClient(TestServer(make_app(self.device)))
+        await self.client.start_server()
+        r = await self.client.post("/api/setup", json={"password": "a good password"}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.code = (await (await self.client.post("/api/record", json={}, headers=H)).json())["code"]
+
+    async def asyncTearDown(self):
+        await self.client.close()
+        self.dir.cleanup()
+
+    def recording(self, hidden=None, mirror=False):
+        """The head-and-arms landmarks of payload(), with the whole body's 3D points beside them."""
+        from test_body_motion import payload as body_payload, pose
+        out = payload(seconds=3.0, fps=12, turn=0.12, arm=0.5)
+        poses = [pose(wave=0.5 + 0.5 * math.sin(k / 3.0)) for k in range(len(out["frames"]))]
+        body = body_payload(poses, fps=12, hidden=hidden)
+        for frame, extra in zip(out["frames"], body["frames"]):
+            frame["body"] = extra["body"]
+        out["mirror"] = mirror
+        return out
+
+    def tried(self):
+        return [c["try_animation"] for c in self.stage.commands if isinstance(c, dict) and "try_animation" in c]
+
+    async def test_the_phone_is_asked_for_the_whole_body(self):
+        info = await (await self.client.get("/r/%s/info" % self.code)).json()
+        self.assertTrue(info["body"])
+        self.assertEqual(info["pose_model"], "pose_landmarker_full.task")
+
+    async def test_a_whole_body_clip_is_tried_and_kept_as_the_avatars_own(self):
+        r = await self.client.post("/r/%s/motion" % self.code, json=self.recording(), headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        out = await r.json()
+        self.assertTrue(out["whole_body"])
+        self.assertEqual(out["scope"], "whole body")
+        self.assertTrue(out["played"])
+        self.assertEqual(len(self.tried()), 1)
+        r = await self.client.post("/r/%s/play" % self.code, json={"mirror": True}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertEqual(len(self.tried()), 2, "swapped and played again")
+        r = await self.client.post("/r/%s/save" % self.code, json={"name": "Little dance!", "words": "do a little dance"},
+                                   headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        saved = await r.json()
+        self.assertEqual((saved["name"], saved["kind"]), ("little_dance", "gesture"))
+        index = self.device.animations.index(self.cid)
+        self.assertEqual(index["little_dance"]["words"], "do a little dance")
+        self.assertEqual(self.device.animations.words(self.cid), {"little_dance": "do a little dance"})
+        r = await self.client.post("/r/%s/save" % self.code, json={"name": "little dance"}, headers=H)
+        self.assertEqual(r.status, 409)
+        self.assertEqual((await r.json())["exists"], "added")
+        r = await self.client.post("/r/%s/save" % self.code, json={"name": "wave"}, headers=H)
+        self.assertEqual((await r.json())["exists"], "built in")
+        r = await self.client.post("/r/%s/save" % self.code, json={"name": "wave", "replace": True}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertEqual(self.device.animations.index(self.cid)["wave"]["kind"], "replaces")
+
+    async def test_legs_out_of_the_picture_give_an_upper_body_clip(self):
+        legs = ("left_hip", "right_hip", "left_knee", "right_knee", "left_ankle", "right_ankle")
+        out = await (await self.client.post("/r/%s/motion" % self.code, json=self.recording(hidden=lambda k: legs),
+                                            headers=H)).json()
+        self.assertTrue(out["whole_body"])
+        self.assertEqual(out["scope"], "upper body")
+        self.assertIn("left leg (not in the picture)", out["said"])
+
+    async def test_too_little_of_the_body_gives_the_head_and_arms_instead(self):
+        nobody = ("left_shoulder", "right_shoulder")
+        r = await self.client.post("/r/%s/motion" % self.code, json=self.recording(hidden=lambda k: nobody if k > 3 else ()),
+                                   headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        out = await r.json()
+        self.assertNotIn("whole_body", out)
+        self.assertIn("Not enough of your body was seen", out["note"])
+        self.assertEqual(self.tried(), [])
 
 
 if __name__ == "__main__":

@@ -50,6 +50,9 @@
 
   <section id="live" class="step" hidden>
     <h2>1. Your camera</h2>
+    <p class="body-hint note" hidden>This is a 3D character, so your whole body is recorded: stand back so the
+      camera sees you from head to feet (a phone propped up works best). If only your top half is in the picture,
+      its legs keep their own movement.</p>
     <div class="camera">
       <video id="cam" autoplay playsinline muted></video>
       <canvas id="cam-seen" width="480" height="360"></canvas>
@@ -71,6 +74,9 @@
 
   <section id="film" class="step" hidden>
     <h2>1. Film the gesture</h2>
+    <p class="body-hint note" hidden>This is a 3D character, so your whole body is recorded: stand back so the
+      camera sees you from head to feet (a phone propped up works best). If only your top half is in the picture,
+      its legs keep their own movement.</p>
     <ul class="tips">
       <li>Prop the phone up, or ask someone to hold it, so your head and shoulders are in view (and your arms, for
         a gesture with them).</li>
@@ -115,7 +121,7 @@
     <h2>5. Keep it</h2>
     <form id="keep-form">
       <label>Call it <input type="text" id="name" maxlength="40" placeholder="little dance" required></label>
-      <div class="choice">
+      <div class="choice" id="kind-row">
         <label><input type="radio" name="kind" value="gesture" checked>
           <span>A gesture: the character makes it when it fits what it is saying.</span></label>
         <label><input type="radio" name="kind" value="idle">

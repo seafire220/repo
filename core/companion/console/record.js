@@ -13,6 +13,9 @@ const STEPS = ["ask-code", "live", "film", "trim", "read", "result", "kept"];
 const FPS = 12;                     // frames read a second: enough for a gesture, quick on a phone
 const LIVE_FPS = 20;                // frames read a second from the live camera
 const LIVE = window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+// The pose model: the larger one when the whole body is recorded (a 3D character), for steadier 3D points.
+const POSE_MODELS = { lite: "/r/assets/pose_landmarker_lite.task", full: "/r/assets/pose_landmarker_full.task" };
+const BODY_POINTS = 33;
 
 const code = (location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/?$/) || [])[1] || "";
 let info = null;                    // what the device said about this link
@@ -23,6 +26,8 @@ let clock = 0;                      // MediaPipe wants its frames' times to keep
 let stopped = false;
 let mirror = false;
 let from = "film";                  // where filming again goes back to: the camera app or the live camera
+let wholeBody = false;              // the last recording was made into a whole-body movement (a 3D character)
+let lastFraming = "";
 
 function show(step) {
   for (const s of STEPS) $(s).hidden = s !== step;
@@ -68,6 +73,7 @@ async function start() {
   }
   layout = info.layout;
   if (info.character) say($("for"), "for " + info.character);
+  for (const el of document.querySelectorAll(".body-hint")) el.hidden = !info.body;
   for (const el of document.querySelectorAll(".max-seconds")) say(el, info.max_seconds);
   countdown(info.expires_in);
   from = LIVE ? "live" : "film";
@@ -105,7 +111,7 @@ async function makeReader(delegate) {
   const face = await vision.FaceLandmarker.createFromOptions(files,
     { ...base("/r/assets/face_landmarker.task"), outputFaceBlendshapes: true, numFaces: 1 });
   const pose = await vision.PoseLandmarker.createFromOptions(files,
-    { ...base("/r/assets/pose_landmarker_lite.task"), numPoses: 1 });
+    { ...base(info.body ? POSE_MODELS.full : POSE_MODELS.lite), numPoses: 1 });
   return { face, pose, delegate };
 }
 
@@ -217,8 +223,32 @@ function frameFrom(face, pose) {
       out.pose = joints.map(([x, y, z, v]) =>
         [round(within(x, -2, 3)), round(within(y, -2, 3)), round(within(z, -5, 5)), round(within(v, 0, 1))]);
     }
+    // The whole body, for a 3D character: each point in metres from between the hips (MediaPipe's world
+    // points), how sure it is of it, and where it is in the picture (to tell what is out of the picture).
+    const world = pose.worldLandmarks && pose.worldLandmarks[0];
+    if (info.body && world && world.length === BODY_POINTS && body.length === BODY_POINTS) {
+      const rows = world.map((w, i) => [w.x, w.y, w.z, body[i].visibility ?? 1, body[i].x, body[i].y]);
+      if (allFinite(rows.flat())) {
+        out.body = rows.map(([x, y, z, v, px, py]) => [round(within(x, -4.9, 4.9)), round(within(y, -4.9, 4.9)),
+          round(within(z, -4.9, 4.9)), round(within(v, 0, 1)), round(within(px, -2, 3)), round(within(py, -2, 3))]);
+      }
+    }
   }
   return out;
+}
+
+// What of the body is in the picture now (for a 3D character): said while the live camera runs.
+function framing(pose) {
+  const body = pose.landmarks && pose.landmarks[0];
+  if (!body) return "It cannot see you yet: stand facing the camera.";
+  const seen = (i) => (body[i].visibility ?? 1) > 0.5 && body[i].x > -0.03 && body[i].x < 1.03 &&
+    body[i].y > -0.03 && body[i].y < 1.03;
+  if (!seen(11) || !seen(12)) return "Step back: your shoulders need to be in the picture.";
+  const legs = [23, 24, 25, 26, 27, 28].every(seen);
+  const feet = [29, 30, 31, 32].every(seen);
+  if (legs && feet) return "Your whole body is in view.";
+  if (legs) return "Nearly: step back a little so your feet are in view too.";
+  return "Your upper body is in view. Step back to get your legs in too, or carry on: its legs keep their own movement.";
 }
 
 function drawSeen(canvas, video, face, pose) {
@@ -236,7 +266,16 @@ function drawSeen(canvas, video, face, pose) {
       chain.forEach((i, k) => (k ? g.lineTo(body[i].x * w, body[i].y * h) : g.moveTo(body[i].x * w, body[i].y * h)));
       g.stroke();
     }
-    for (const i of layout.pose_points) if ((body[i].visibility ?? 1) > 0.5) dot(body[i], "#3a5bd9");
+    if (info.body && body.length === BODY_POINTS) {
+      for (const chain of [[24, 26, 28, 30, 32], [23, 25, 27, 29, 31]]) {
+        g.beginPath();
+        chain.forEach((i, k) => (k ? g.lineTo(body[i].x * w, body[i].y * h) : g.moveTo(body[i].x * w, body[i].y * h)));
+        g.stroke();
+      }
+      for (let i = 11; i < BODY_POINTS; i++) if ((body[i].visibility ?? 1) > 0.5) dot(body[i], "#3a5bd9");
+    } else {
+      for (const i of layout.pose_points) if ((body[i].visibility ?? 1) > 0.5) dot(body[i], "#3a5bd9");
+    }
   }
   const points = face.faceLandmarks && face.faceLandmarks[0];
   if (points) for (const i of layout.face_points) dot(points[i], "#ffb74d");
@@ -278,7 +317,7 @@ async function readMovement() {
       pose = models.pose.detectForVideo(video, clock);
     }
     const frame = frameFrom(face, pose);
-    if (frame.face || frame.pose) found++;
+    if (frame.face || frame.pose || frame.body) found++;
     frames.push(frame);
     drawSeen($("seen"), video, face, pose);
     $("progress").value = (i + 1) / count;
@@ -290,7 +329,8 @@ async function readMovement() {
   }
   if (found < count / 2) {
     problem("You were found in only " + Math.round(100 * found / count) + "% of the video. Film it again facing " +
-      "the camera, with your head and shoulders in view, in good light.");
+      "the camera, with " + (info.body ? "as much of yourself in view as you can" : "your head and shoulders in view") +
+      ", in good light.");
     show(from);
     return;
   }
@@ -309,9 +349,17 @@ async function send(payload) {
     return;
   }
   problem("");
-  const moves = answer.moves.length ? answer.moves.join(", ").replace(/, ([^,]*)$/, " and $1") : "moves";
-  say($("result-text"), (answer.played ? "The character is doing your gesture now: it " : "Your gesture: it ") +
-    moves + " (" + answer.seconds.toFixed(1) + " seconds).");
+  wholeBody = !!answer.whole_body;
+  if (wholeBody) {
+    say($("result-text"), (answer.played ? "The character is doing your movement now" : "Your movement") +
+      " (" + answer.scope + ", " + answer.seconds.toFixed(1) + " seconds). " + answer.said);
+  } else {
+    const moves = answer.moves.length ? answer.moves.join(", ").replace(/, ([^,]*)$/, " and $1") : "moves";
+    say($("result-text"), (answer.played ? "The character is doing your gesture now: it " : "Your gesture: it ") +
+      moves + " (" + answer.seconds.toFixed(1) + " seconds)." + (answer.note ? " " + answer.note : ""));
+  }
+  $("kind-row").hidden = wholeBody;          // a 3D character's own movement is kept as a gesture
+  $("words-row").hidden = !wholeBody && document.querySelector("input[name=kind]:checked").value !== "gesture";
   noteFor(answer);
   $("replace").hidden = true;
   say($("keep-msg"), "");
@@ -328,21 +376,25 @@ function noteFor(answer) {
 
 async function playAgain() {
   try {
-    noteFor(await call("POST", "/r/" + code + "/play", { mirror }));
+    const answer = await call("POST", "/r/" + code + "/play", { mirror });
+    if (answer.said) say($("result-text"), "Your movement, " + (mirror ? "swapped left for right" : "as filmed") + ". " +
+      answer.said);
+    noteFor(answer);
     problem("");
   } catch (err) { problem(err.message); }
 }
 
 async function keep(replace) {
-  const kind = document.querySelector("input[name=kind]:checked").value;
+  const kind = wholeBody ? "gesture" : document.querySelector("input[name=kind]:checked").value;
   const body = { name: $("name").value, kind, words: kind === "gesture" ? $("words").value : "", mirror, replace };
   say($("keep-msg"), "");
   $("btn-keep").disabled = true;
   try {
     const answer = await call("POST", "/r/" + code + "/save", body);
     say($("kept-text"), "Kept as “" + answer.name.replace(/_/g, " ") + "”. " +
-      (answer.kind === "gesture" ? "The character can make it from now on, when it fits."
-        : "The character will do it now and then, when it is idle."));
+      (answer.kind === "replaces" ? "The character does yours instead of its own from now on."
+        : answer.kind === "gesture" ? "The character can make it from now on, when it fits."
+          : "The character will do it now and then, when it is idle."));
     show("kept");
   } catch (err) {
     if (err.status === 409 && err.data && err.data.exists) {
@@ -412,6 +464,10 @@ function liveStep(now) {
   }
   const frame = frameFrom(face, pose);
   drawSeen($("cam-seen"), cam.video, face, pose);
+  if (info.body && !cam.socket) {
+    const words = framing(pose);
+    if (words !== lastFraming) { lastFraming = words; liveNote(words); }
+  }
   if (cam.recording) {
     cam.recording.frames.push([now, frame]);
     const seconds = (now - cam.recording.began) / 1000;
@@ -460,7 +516,7 @@ async function stopLiveRecording() {
   stopCopying();                               // the recording plays on the screen next, not you
   from = "live";
   const frames = steady(recording.frames, FPS);
-  const found = frames.filter((f) => f.face || f.pose).length;
+  const found = frames.filter((f) => f.face || f.pose || f.body).length;
   if (found < frames.length / 2) {
     problem("You were in view for only " + Math.round(100 * found / frames.length) + "% of it. Face the camera, " +
       "with your head and shoulders in view, in good light.");

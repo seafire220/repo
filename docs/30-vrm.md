@@ -234,6 +234,9 @@ Under the character, **3D animation** on the settings page:
   **new gesture** with a name and a few words saying what it means (the
   language model is told, as for gestures made in the gesture editor).
   **Try** plays it once on the screen; **Remove** takes it away.
+- **Recorded with a phone**: the Animation tab's phone recording records a 3D character's whole body and
+  keeps it here as a new gesture (or in place of one), with only the parts of the body the camera saw
+  (`26-animation-director.md`, "The whole body, for 3D avatars").
 
 Files are checked first: a glTF binary with the VRM Animation extension
 and a hips bone, its data inside the one file, at most 16 MB and 2 minutes,

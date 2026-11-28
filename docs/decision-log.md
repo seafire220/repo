@@ -1041,3 +1041,19 @@ rejected. Settled entries are not reopened without new evidence.
 - **One engine for both** (`live_motion.py`): resting pose, mirror (on: like a reflection, as VTubing apps
   do), smoothing, at most 30 updates a second, and recording into a gesture; one stage command
   (`{"live": ...}`) that works for every kind of character and hands back by itself when updates stop.
+
+## D-072 — The whole body, recorded with a phone, for 3D avatars
+
+- Date: 2026-11-28
+- Decision: for a 3D (VRM) character playing clips, the phone's recording is of the whole body. The phone
+  sends MediaPipe's 33 3D body points (its larger pose model, pinned by SHA-256); the device turns them into
+  the avatar's bone turns and keeps them as one of the avatar's own VRM Animation clips. Only parts of the
+  body seen at least half the time are kept; the avatar's own movement shows in the rest; short gaps are
+  bridged and long ones rest the part; with the shoulders unseen most of the time it makes the
+  head-and-arms gesture instead, saying why (`26-animation-director.md`).
+- Why: the owner asked for it, with failsafes for a body not wholly in the picture; a clip that moves only
+  the bones it has lets the stage keep the avatar's own idle movement in the rest, so an upper-body
+  recording still looks whole.
+- Rejected: solving on the phone (the device's numpy is quicker to test and the same for every phone);
+  following sideways steps (a hand-held phone moves too); copying the whole body live (later, if wanted).
+

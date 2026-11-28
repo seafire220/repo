@@ -440,8 +440,10 @@ function showRecording(r) {
   const said = {
     waiting: "Waiting for your phone to open the link…",
     opened: "Your phone has the recorder open.",
-    ready: "A gesture came from your phone and is playing on the screen" +
-      (recording.moves && recording.moves.length ? ": it " + recording.moves.join(", ") : "") + ".",
+    ready: recording.whole_body
+      ? "A whole-body movement came from your phone and is playing on the screen. " + (recording.moves || []).join(" ")
+      : "A gesture came from your phone and is playing on the screen" +
+        (recording.moves && recording.moves.length ? ": it " + recording.moves.join(", ") : "") + ".",
     saved: "Kept: " + (recording.saved || []).map((n) => n.replace(/_/g, " ")).join(", ") + ". Record another on your phone, or stop.",
   }[recording.state] || "";
   const assets = recording.assets === "fetching" ? " The device is downloading what your phone needs to read movement (once only)." :

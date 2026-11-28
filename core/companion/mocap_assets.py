@@ -32,10 +32,14 @@ FILES = {
     "pose_landmarker_lite.task": (
         "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
         None, "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a"),
+    # The larger pose model: its 3D points are steadier, for recording the whole body of a 3D avatar.
+    "pose_landmarker_full.task": (
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+        None, "5134a3aad27a58b93da0088d431f366da362b44e3ccfbe3462b3827a839011b1"),
 }
-SIZE_MB = 24
+SIZE_MB = 34
 NOTICE = """MediaPipe for the web (@mediapipe/tasks-vision 1.2.3) and its face landmarker and pose landmarker
-(lite) models, by Google, under the Apache License, Version 2.0 (the model cards say the same). The device
+(lite and full) models, by Google, under the Apache License, Version 2.0 (the model cards say the same). The device
 gives them to a phone's browser when it records a gesture; they are used unchanged. The licence's text is
 among the screen program's licences, and in /usr/share/common-licenses/Apache-2.0.
 """

@@ -24,7 +24,7 @@ project). Apache License 2.0; its text is among the screen program's licences, a
 /usr/share/common-licenses/Apache-2.0.
 
 Recording a gesture with a phone: MediaPipe for the web (@mediapipe/tasks-vision 1.2.3) and its face
-landmarker and pose landmarker (lite) models, by Google. Apache License 2.0 (the models' cards say the
+landmarker and pose landmarker (lite and full) models, by Google. Apache License 2.0 (the models' cards say the
 same); its text is among the screen program's licences, and in /usr/share/common-licenses/Apache-2.0. The
 device gives them, unchanged, to the phone's browser, which runs them on the phone's own video.
 
