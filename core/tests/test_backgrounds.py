@@ -168,7 +168,8 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_choosing_adding_and_removing(self):
         info = await (await self.client.get("/api/backgrounds")).json()
-        self.assertEqual([p["id"] for p in info["pictures"][:3]], ["auto", "none", "studio"])
+        self.assertEqual([p["id"] for p in info["pictures"][:4]], ["auto", "none", "photos", "studio"])
+        self.assertEqual([p["id"] for p in info["pictures"] if p["kind"] == "festive"], list(backgrounds.FESTIVE))
         self.assertEqual(info["default"]["choice"], "auto")
         thumb = await self.client.get("/api/backgrounds/sunset/thumb")
         self.assertEqual((thumb.status, thumb.content_type), (200, "image/jpeg"))

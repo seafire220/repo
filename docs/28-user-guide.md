@@ -114,8 +114,10 @@ microphone stays off whatever else asks.
 ### Things you can ask for
 
 - **Timers and alarms**: "Set a timer for ten minutes for the pasta",
-  "Wake me at half past seven", "Cancel the pasta timer". They ring out
-  loud, and they survive the device being switched off and on.
+  "Wake me at half past seven", "Cancel the pasta timer". The character
+  tells you itself when one goes off, and calls again, a little louder,
+  until you answer or press the button (see **Your day**). They survive
+  the device being switched off and on.
 - **Things to look up**: turn on **Allow web search** under **Device**.
   Claude models search the web themselves; other models need a "Web
   search" key from tavily.com (free monthly allowance), added under **AI
@@ -435,6 +437,75 @@ Turn on **Device → Speak first** and the character greets you when you come ba
 - Choose how long apart counts (3 hours by default) and the quiet hours when it never speaks first (10 pm to 8 am by default).
 - A television left talking can set it off, so it is off unless you turn it on.
 
+## Your day
+
+The **Your day** tab of the settings page makes the character part of your day. Everything here is off
+or empty until you choose it, except special days (holidays and its own arrival day) and calling again
+until you answer.
+
+### About you
+
+Your **name** (what the character calls you) and your **birthday** (the month and day; the year only if
+you want it to know your age). The character is told your name in every conversation.
+
+### The weather
+
+Turn on **Know the weather** and the character knows today's and tomorrow's weather where you live: it
+mentions it when it says good morning and when it wakes you, the clock shows it, and you can ask ("will
+it rain this afternoon?"). Until you choose a town it uses your time zone's main city; **Change** finds
+yours in a list kept on the device (every town of 15,000 people or more; choose the nearest larger one if
+yours is not there). Temperatures are in **Celsius** or **Fahrenheit**, or the usual way where you are.
+**Save and check the weather** shows what the character would say.
+
+Forecasts come from MET Norway (the Norwegian Meteorological Institute), which offers them to everyone
+for free. Only your town's position, to about a kilometre, is sent; what you type to find your town is
+not sent anywhere. The device asks at most every half an hour, and only when something will show or
+say the weather.
+
+### Good morning
+
+With **Device → Speak first** on, the first time it hears you each morning (5 am to noon) it says good
+morning, in its own words, with the weather and any plans you told it about for the day, however short
+the night was. Turn off **Good morning** to keep only the usual "welcome back".
+
+### Wake-ups, alarms and timers
+
+**Add a wake-up**: a time, the days of the week (weekdays to begin with) and, if you like, what it is
+for. When the time comes the character wakes you itself, in its own words: good morning, the time, the
+weather and your first plan. If you don't answer, it calls again every minute, a little louder each
+time, up to five times. **Press the button**, or just answer it ("I'm up!"), to stop it; it then
+listens, so you can ask for "ten more minutes" (it sets a timer). **Try one now** rings a wake-up at
+once, to hear it. A wake-up missed while the device was off is not rung late.
+
+Alarms and timers you ask for by voice work the same way (timers call three times, half a minute apart,
+at the usual volume), and are listed under **Set by voice**, where you can cancel them. If the AI
+service cannot be reached, the character still says it, in a few set words; if its voice cannot be
+reached either, the device's own voice says it; failing everything, it beeps. While one is ringing, a
+note on the screen says how to stop it, and the settings page has a **Stop it** button.
+
+### Special days
+
+On **your birthday**, on **the day the character arrived** (every year, and its hundredth day), on
+**your own days** (add a date and what it is, such as "our anniversary"; it counts the years when you
+give the year, or tick **only that year** for a one-off) and on **holidays** (New Year's Day and Eve,
+Valentine's Day, Easter, Halloween, Christmas Eve and Day), the character knows, and wishes you well the
+first time you talk that day. With **a festive background** (on to begin with), the screen shows one of
+six festive pictures all that day (balloons, fireworks, hearts, a friendly Halloween night, snowy lights,
+spring), unless your background is **None**. The festive pictures can also be chosen as ordinary
+backgrounds.
+
+### The clock
+
+**A clock over the character** shows the time, the date and the weather in the top corner:
+**while nobody is talking** (it steps aside while you talk), **all the time**, or never. Choose a 12- or
+24-hour clock, or the usual way where you are.
+
+### The photo frame
+
+Add your own pictures (**Characters → Background**), then choose **Your pictures, one after another**:
+they take turns behind the character, a new one every few minutes (choose how often on **Your day**),
+changing only while nobody is talking. With no pictures of your own yet, it follows the time of day.
+
 ## AI services
 
 Under **AI services**, in three parts:
@@ -489,6 +560,10 @@ Under **AI services**, in three parts:
   model you chose; with a model on your own computer, it stays in your home.
 - **The settings page** only answers on your home network, behind your
   password.
+- **The weather** (only if you turn it on): your town's position, to about
+  a kilometre, goes to MET Norway, with the software's name; nothing else.
+  Your name, birthday, town and days are kept on the device, and left out
+  of support reports.
 
 ## The screen at night
 

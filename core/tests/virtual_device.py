@@ -18,7 +18,7 @@ from aiohttp import web  # noqa: E402
 from companion.audio import Speaker  # noqa: E402
 from companion.device import Device  # noqa: E402
 from companion.web import make_app  # noqa: E402
-from fakes import FakeLLM, FakeStage, FakeTTS  # noqa: E402
+from fakes import FakeFetch, FakeLLM, FakeStage, FakeTTS  # noqa: E402
 
 
 def providers(which, device):
@@ -34,6 +34,7 @@ def providers(which, device):
 async def main(data, port, host="127.0.0.1", tls_port="8443"):
     device = Device(data, speaker=Speaker(command=None), stage=FakeStage(), provider_factory=providers)
     device.tls_port, device.web_host = int(tls_port), host
+    device.weather.fetch = FakeFetch()          # a made-up forecast: trying the console never asks MET Norway
     device.start()
     runner = web.AppRunner(make_app(device))
     await runner.setup()

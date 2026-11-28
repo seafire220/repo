@@ -84,3 +84,20 @@ table.tracks td:nth-child(2) input { width: 100%; box-sizing: border-box; }
 .rec > div { flex: 1 1 260px; min-width: 0; }
 .rec a { word-break: break-all; }
 .code { font-family: ui-monospace, monospace; letter-spacing: 0.12em; }
+.bg-swatch.bg-photos { background: linear-gradient(135deg, #d9a066 0 30%, #6aa0d8 30% 62%, #7cbf7a 62%); }
+.bg-group { grid-column: 1 / -1; font-size: 0.9rem; color: var(--muted); margin-top: 4px; }
+.rows { list-style: none; padding: 0; margin: 6px 0; }
+.rows li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rows li input[type=text] { flex: 1; min-width: 120px; }
+.days { display: inline-flex; gap: 2px; }
+.days label { display: inline-block; margin: 0; }
+.days input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.days span { display: inline-block; width: 30px; text-align: center; padding: 4px 0; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.days input:checked + span { background: var(--accent); color: #fff; border-color: var(--accent); }
+.days input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.date-row { margin: 10px 0; }
+.date-row input[type=number] { flex: 0 1 9em; }
+.choices { list-style: none; padding: 0; margin: 4px 0 8px; }
+.choices li { margin: 4px 0; }
+.choices button { text-align: left; }
+.notice.ring { border-color: var(--accent); }

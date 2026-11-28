@@ -10,18 +10,19 @@ import shutil
 import subprocess
 import time
 
-from . import animations, backgrounds, family, package, providers
+from . import animations, backgrounds, family, package, providers, special_days
+from . import weather as weather_module
 from .audio import Detector, Microphone, Speaker, tone
 from .backlight import Backlight
 from .characters import Characters, split_persona
 from .conversation import Conversation
-from .memory import Memory
+from .memory import Memory, talk_day
 from . import motions, screen, speech_text, temperament
 from . import meaning as meaning_module
 from . import updates as updates_module
 from . import wakeword
 from .network import NetworkError, WiFi
-from .overlays import CAPTION, HEARD, HINT, Overlays
+from .overlays import CAPTION, CLOCK, HEARD, HINT, Overlays
 from .providers import ProviderError
 from .stage_link import StageLink
 from .store import Store, redact, write_atomic
@@ -43,6 +44,29 @@ GREETING_PROMPT = ("(Nothing has been said yet. You hear someone nearby, most li
                    "way. If a plan of theirs has had its day, you may ask how it went.)")
 ANSWER_WINDOW = 30.0
 PRESENCE_SECONDS = 0.8
+# The morning hello (speak_first.morning): the first time someone is heard in the morning, whenever they last talked.
+MORNING_PROMPT = ("(Nothing has been said yet. It is morning, and you hear someone nearby, most likely them, for the "
+                  "first time today. Speak first: wish them good morning, warmly and in your own way, in two or three "
+                  "short sentences. Mention the weather simply, as a friend would, and one of their plans for today if "
+                  "they have any. If today is a special day for them, wish them well for it.)")
+MORNING_HOURS = (5, 12)
+WEATHER_WAIT = 6.0            # seconds the morning hello and a wake-up wait for the weather to come
+
+# Alarms and timers, said by the character itself (docs/28-user-guide.md, "Your day"): what the model is told;
+# how long it listens for an answer before calling again; how many times it calls; how much louder each time.
+RING_PROMPTS = {
+    "wake": ("(The wake-up alarm they set for %(time)s has just gone off, and they may still be asleep. Wake them gently "
+             "but clearly, in your own way, in two or three short sentences: good morning, the time, the weather today, "
+             "and their first plan if they have one. If they ask for a few more minutes, set a timer for it.)"),
+    "alarm": ("(The alarm they asked you to set for %(time)s, \"%(label)s\", has just gone off. Tell them, briefly, in "
+              "one or two short sentences.)"),
+    "timer": "(The \"%(label)s\" timer they asked you to set has just finished. Tell them, briefly, in one short sentence.)",
+}
+RING_AGAIN = {"wake": 60.0, "alarm": 60.0, "timer": 30.0}
+RING_TIMES = {"wake": 5, "alarm": 5, "timer": 3}
+RING_LOUDER = 0.1
+RING_WAIT = 20.0              # an alarm waits at most this long for a reply in progress to end
+WAKE_LATE = 5 * 60            # a daily wake-up still rings this long after its time (a restart just then)
 MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
 MEMORY_MAX_TOKENS = 700
 
@@ -85,6 +109,12 @@ class Device:
         self.animations = animations.Animations(self.characters)
         self.backgrounds = backgrounds.Backgrounds(data_dir)
         self.background_sent = None      # the picture the stage was last told to show
+        self.weather = weather_module.Weather(data_dir)
+        self._weather_task = None        # a forecast being fetched in the background
+        self.rings = {}                  # alarms and timers ringing now: label -> task
+        self._answered = None            # set when someone answers a ringing alarm (speaks, or presses the button)
+        self._ring_lock = None           # one alarm speaks at a time
+        self.clock_shown = None          # what the clock over the character shows now (None: hidden)
         # Gestures and idle actions changed or added on the settings page, for every character.
         self.custom_motions = motions.CustomMotions(os.path.join(data_dir, "config", "custom-motions.json"))
         speech_text.set_custom_gestures(self.custom_motions.words())
@@ -178,6 +208,7 @@ class Device:
             self._stage_failed(event.get("message") or "the screen program stopped")
         if kind in ("ready", "size") and event.get("width") and event.get("height"):
             self.overlays.screen = (int(event["width"]), int(event["height"]))
+            self.clock_shown = None               # drawn again for this screen (and after the stage started again)
         if kind == "ready":
             self.stage_ready_at = time.time()
             # A stage that started again has nothing over the character and a lit screen.
@@ -195,6 +226,10 @@ class Device:
             self.use_custom_motions()
             self.use_character_motion()
             self.tell_the_time()
+            try:
+                self.clock_step()
+            except Exception:
+                log.exception("the clock could not be shown")
 
     def tell_the_time(self):
         """Tell the stage the local time of day (the character is sleepy at night)."""
@@ -202,16 +237,31 @@ class Device:
             now = time.localtime()
             self.stage.clock(now.tm_hour + now.tm_min / 60.0 + now.tm_sec / 3600.0)
 
-    async def clock_watch(self, every=600.0):
-        """Keep the stage's time of day right (the clock may change, or be set, while it runs), and the
-        background with it when it follows the time of day."""
+    async def clock_watch(self, every=15.0, stage_every=600.0):
+        """Keep the screen in step with the time: the stage's time of day (the character is sleepy at night; the
+        clock may be changed while it runs), the background (the time of day's, a special day's, the next of the
+        owner's pictures: changed only while nobody is talking), the clock over the character and the weather it
+        shows, and the daily wake-ups. Wakes every `every` seconds, and just after each minute."""
+        told = time.time()
         while True:
-            await asyncio.sleep(every)
-            self.tell_the_time()
-            try:
-                self.show_background()
-            except OSError:
-                log.exception("the background could not be changed")
+            await asyncio.sleep(max(1.0, min(every, 60.5 - time.time() % 60)))
+            now = time.time()
+            for step in (self.wake_step, self._background_step, self.clock_step, self._weather_step):
+                try:
+                    step(now)
+                except Exception:
+                    log.exception("the clock watch failed at %s", step.__name__)
+            if now - told >= stage_every:
+                told = now
+                self.tell_the_time()
+
+    def _quiet(self):
+        """Nobody is talking to the character, and no alarm is ringing."""
+        return self.state == "idle" and not self.rings and not (self.conversation is not None and self.conversation.busy)
+
+    def _background_step(self, now=None):
+        if self._quiet():
+            self.show_background()
 
     async def stage_watch(self, patience=25.0):
         """If the character cannot be shown (the stage keeps failing to start), show a card instead.
@@ -497,13 +547,16 @@ class Device:
             self.background_sent = settings["background"]
         write_atomic(self.stage_settings, json.dumps(settings, indent=1))
 
-    def background_spec(self, cid, hour=None):
-        """What the stage draws behind this character now (backgrounds.py), or None."""
+    def background_spec(self, cid, hour=None, now=None):
+        """What the stage draws behind this character now (backgrounds.py), or None: on a special day, its festive
+        picture (unless the owner turned them off, or chose no picture at all)."""
         try:
             own = self.characters.device_settings(cid)
         except (OSError, ValueError):
             own = {}
-        return self.backgrounds.stage_spec(self.store.settings(), own, hour)
+        settings = self.store.settings()
+        festive = special_days.festive(self.specials(now, cid), settings)
+        return self.backgrounds.stage_spec(settings, own, hour, festive=festive, now=now)
 
     def show_background(self, force=False):
         """Tell the stage at once which picture goes behind the character on the screen (after a change of
@@ -541,10 +594,81 @@ class Device:
             history_turns=int(settings["conversation"].get("history_turns", 12)),
             on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings),
             gestures=None if settings["conversation"].get("gestures", True) else [], on_caption=self._caption,
-            family_safe=bool(settings.get("family_safe", {}).get("on")))
+            family_safe=bool(settings.get("family_safe", {}).get("on")), today=self.today_text)
         # A reserved character's words call for fewer gestures; an expressive one's for more.
         conversation.planner.expressiveness = temperament.for_stage(char_settings.get("temperament"))[1]
         return conversation
+
+    # ----- today: the owner, special days, the weather, their plans (docs/28-user-guide.md, "Your day")
+    def arrival(self, cid):
+        """The day a character arrived on this device: kept in its device settings when it is installed (or,
+        for one installed before that was kept, the day its files were written)."""
+        try:
+            return datetime.date.fromisoformat(self.characters.device_settings(cid).get("arrived") or "")
+        except (TypeError, ValueError):
+            pass
+        try:
+            written = os.path.getmtime(self.characters.file(cid, "manifest.json"))
+        except OSError:
+            return None
+        day = datetime.date.fromtimestamp(written)
+        try:
+            self.characters.set_device_settings(cid, {"arrived": day.isoformat()})
+        except OSError:
+            pass
+        return day
+
+    def specials(self, now=None, cid=None):
+        """What is special about today (special_days.on) for the character on the screen, or `cid`."""
+        now = now or time.time()
+        cid = cid or self.active_id()
+        return special_days.on(datetime.date.fromtimestamp(now), self.store.settings(),
+                               self.arrival(cid) if cid else None)
+
+    def today_text(self, now=None):
+        """What the character is told about today, for its instructions: the owner's name, special days, the
+        weather (as last fetched; fetched again in the background when it is due) and their plans for today."""
+        now = now or time.time()
+        settings = self.store.settings()
+        lines = []
+        name = " ".join(str((settings.get("owner") or {}).get("name") or "").split())
+        if name:
+            lines.append("The person you live with is called %s." % name)
+        cid = self.active_id()
+        lines += [s["line"] for s in self.specials(now, cid)]
+        if self.weather.on(settings):
+            weather_line = weather_module.describe(self.weather.now(settings, self.timezone(), now))
+            if weather_line:
+                lines.append(weather_line)
+            self._weather_step(now, needed=True)
+        if cid:
+            memory = self.conversation.memory if self.conversation is not None else self.memory(cid)
+            plans = memory.plans_on(datetime.date.fromtimestamp(now))
+            if plans:
+                lines.append("Their plans for today, from what they told you: %s." % "; ".join(plans[:6]))
+        return "\n".join(lines)
+
+    def _weather_step(self, now=None, needed=False):
+        """Fetch the forecast in the background when it is due and something shows it: the clock with the
+        weather, on a lit screen, or (`needed`) a reply that is told it."""
+        settings = self.store.settings()
+        if not self.weather.on(settings) or (self._weather_task is not None and not self._weather_task.done()):
+            return
+        clock = settings.get("clock") or {}
+        shown = clock.get("show", "off") != "off" and clock.get("weather", True) and self.screen_mode != "off"
+        if (needed or shown) and self.weather.due(settings, self.timezone(), now):
+            self._weather_task = asyncio.ensure_future(self.weather.refresh(settings, self.timezone()))
+
+    async def weather_now(self, wait=WEATHER_WAIT):
+        """The weather summed up, fetching it first if it is due (waiting at most `wait` seconds); or None."""
+        settings = self.store.settings()
+        if not self.weather.on(settings):
+            return None
+        try:
+            await asyncio.wait_for(self.weather.refresh(settings, self.timezone()), wait)
+        except asyncio.TimeoutError:
+            pass
+        return self.weather.now(settings, self.timezone())
 
     def _search_function(self, settings):
         """Search for models without their own: only with a search key, and not for Claude (it has its own)."""
@@ -561,11 +685,14 @@ class Device:
     def _conversation_event(self, kind, data):
         if kind in ("heard", "speaking first", "saying"):
             self.activity()
+        if kind == "heard" and self.rings:
+            self.stop_ringing("answered")         # they spoke to it: the alarm has done its job
         if kind == "heard":
             self.set_state("thinking")
             captions = self.store.settings().get("captions", {})
             if captions.get("on") and captions.get("heard") and (data or {}).get("text"):
                 self.overlays.heard(data["text"])
+                self.clock_step()                 # the clock makes room for what it heard
         elif kind == "saying":
             self.set_state("speaking")
         elif kind == "replied":
@@ -708,6 +835,10 @@ class Device:
         if state != self.state:
             self.state = state
             self.emit("state", {"state": state})
+            try:
+                self.clock_step()            # the clock goes while someone talks to the character, and comes back
+            except Exception:
+                log.exception("the clock could not be shown")
 
     # ----- talking
     async def say(self, text):
@@ -736,10 +867,15 @@ class Device:
         if within_hours(now, opts.get("quiet_from", 22), opts.get("quiet_to", 8)):
             return None
         cid = self.active_id()
-        if not cid:
+        if not cid or self.rings:
             return None
-        apart = now - max(self.memory(cid).last_turn_time(), self.last_greeting)
-        if apart < float(opts.get("after_hours", 3)) * 3600:
+        last = max(self.memory(cid).last_turn_time(), self.last_greeting)
+        apart = now - last
+        hour = datetime.datetime.fromtimestamp(now).hour
+        # The first time it hears someone in the morning, it says good morning, however short the night was.
+        morning = bool(opts.get("morning", True)) and MORNING_HOURS[0] <= hour < MORNING_HOURS[1] and \
+            (not last or talk_day(last) != talk_day(now))
+        if not morning and apart < float(opts.get("after_hours", 3)) * 3600:
             return None
         try:
             self.conversation = self.conversation or self.make_conversation()
@@ -749,8 +885,12 @@ class Device:
         days = apart / 86400
         gap = ("about %d days" % round(days)) if days >= 1.5 else ("about %d hours" % max(1, round(apart / 3600))) \
             if apart < 30 * 86400 else "a long time"
-        self.emit("speaking first", {"apart": round(apart)})
-        task = self.conversation.start("", prompt=GREETING_PROMPT % gap)
+        self.emit("speaking first", {"apart": round(apart), "morning": morning})
+        if morning:
+            await self.weather_now()           # the weather it mentions, fetched now if it is due
+            if self.conversation is None or self.conversation.busy or self.rings:
+                return None                    # someone started talking meanwhile
+        task = self.conversation.start("", prompt=MORNING_PROMPT if morning else GREETING_PROMPT % gap)
         reply = await task
         if reply is not None and not reply.error and not reply.interrupted and \
                 self.store.settings()["listening"].get("mode", "auto") == "auto" and not self.listening:
@@ -803,6 +943,17 @@ class Device:
         self.activity()
         if hasattr(self.stage, "poke"):
             self.stage.poke()                 # someone is there
+        if self.rings:
+            # An alarm is ringing: it stops, and the character listens (to "five more minutes", say).
+            self.stop_ringing()
+            self.emit("button", {"did": "alarm stopped"})
+            if mode == "auto" and not self.muted:
+                self.listening = True
+                self._wake_session = False
+                self.answer_until = time.time() + ANSWER_WINDOW
+                self.set_state("listening")
+                self.stage.state("listening")
+            return
         if self.conversation is not None and self.conversation.busy:
             self.interrupt()
             self.emit("button", {"did": "interrupt"})
@@ -1097,6 +1248,12 @@ class Device:
             self.overlays.hide(HEARD)
         elif not captions.get("heard"):
             self.overlays.hide(HEARD)
+        if any(old.get(k) != new.get(k) for k in ("clock", "weather")):
+            self.clock_shown = None if old.get("clock") != new.get("clock") else self.clock_shown
+            self.clock_step()
+            self._weather_step(needed=True)
+        if any(old.get(k) != new.get(k) for k in ("special_days", "owner", "background")):
+            self.show_background()
 
     # ----- timers and alarms
     def action(self, action):
@@ -1120,22 +1277,257 @@ class Device:
     def _schedule(self, label, due, kind):
         if label in self.timers:
             self.timers.pop(label)[1].cancel()
-        handle = asyncio.get_running_loop().call_later(max(0.0, due - time.time()),
-                                                       lambda: asyncio.ensure_future(self._ring(label, kind)))
+        handle = asyncio.get_running_loop().call_later(max(0.0, due - time.time()), self._ring, label, kind)
         self.timers[label] = (due, handle, kind)
-        self.emit("timer", {"label": label, "due": round(due), "kind": kind})
+        self.emit("timer", {"label": label, "due": round(due), "type": kind})
 
-    async def _ring(self, label, kind):
+    def _ring(self, label, kind, times=None):
+        """A timer or alarm has come (or a daily wake-up, kind "wake"): the character says so itself, and again,
+        a little louder each time, until someone answers (docs/28-user-guide.md, "Your day"). Returns the task."""
         self.timers.pop(label, None)
         self._save_timers()
-        self.emit("timer", {"label": label, "did": "rang"})
-        words = "Your %s timer is done." % label if kind == "timer" else "It's time: %s." % label
+        if kind == "alarm" and "wake" in label.lower():
+            kind = "wake"
+        self.emit("timer", {"label": label, "did": "rang", "type": kind})
+        if label in self.rings:
+            return self.rings[label]
+        task = asyncio.ensure_future(self._ringing(label, kind, times))
+        self.rings[label] = task
+        return task
+
+    async def _ringing(self, label, kind, times=None):
+        settings = self.store.settings()
+        if times is None:
+            times = RING_TIMES.get(kind, 3) if (settings.get("alarms") or {}).get("repeat", True) else 1
+        if self._answered is None:
+            self._answered, self._ring_lock = asyncio.Event(), asyncio.Lock()
+        self._answered.clear()
+        answered = False
         try:
-            self.conversation = self.conversation or self.make_conversation()
-            await self.conversation.start("(The %s you asked for has just gone off. Tell the person, briefly: %s)" % (kind, words))
-        except ProviderError:
+            for attempt in range(times):
+                self.activity()
+                self.overlays.hint(ring_hint(label, kind))
+                await self._wait_quiet()
+                await self._ring_call(label, kind, attempt)
+                last = attempt + 1 == times
+                if self._answered.is_set() or await self._wait_answer(ANSWER_WINDOW if last else RING_AGAIN.get(kind, 30.0)):
+                    answered = True
+                    break
+            if not answered:
+                self.emit("timer", {"label": label, "did": "not answered", "type": kind})
+        except asyncio.CancelledError:
+            pass                                  # stopped: the button, or they spoke
+        finally:
+            self.speaker.volume = float(self.store.settings().get("volume", 0.8))
+            if self.rings.get(label) is asyncio.current_task():
+                self.rings.pop(label, None)
+            if not self.rings:
+                self.overlays.hide(HINT)
+
+    async def _wait_quiet(self, limit=RING_WAIT):
+        """Let a reply in progress end (for up to `limit` seconds) before an alarm speaks over it."""
+        end = time.time() + limit
+        while self.conversation is not None and self.conversation.busy and time.time() < end:
+            await asyncio.sleep(0.25)
+
+    async def _ring_call(self, label, kind, attempt):
+        """One call: the first in the character's own words, from the language model (the time, and for a
+        wake-up the weather and the day's plans); a fixed line when that fails, and for the calls after it; in
+        the device's own voice if the character's cannot be reached; tones if no voice can."""
+        settings = self.store.settings()
+        name = " ".join(str((settings.get("owner") or {}).get("name") or "").split())
+        now = time.time()
+        weather_line = ""
+        if kind == "wake" and attempt == 0:
+            weather_line = weather_module.spoken(await self.weather_now())
+        louder = RING_LOUDER * attempt if kind != "timer" else 0.0
+        async with self._ring_lock:
+            try:
+                self.conversation = self.conversation or self.make_conversation()
+            except ProviderError as error:
+                self.emit("error", {"message": "the alarm: %s" % error})
+                self.conversation = None
+            self.speaker.volume = min(1.0, float(settings.get("volume", 0.8)) + louder)
+            if attempt == 0 and self.conversation is not None:
+                reply = await self.conversation.start("", prompt=RING_PROMPTS[kind] % {
+                    "time": weather_module.clock_words(now), "label": label})
+                if reply is not None and (reply.interrupted or (reply.spoken and not reply.error)):
+                    return
+            if await self._say_fixed(ring_line(kind, label, now, name, attempt, weather_line)):
+                return
             for _ in range(3):
                 await self.notice()
+
+    def _voices(self):
+        """The voices an alarm can be said in, best first: the character's own, then the device's (no internet)."""
+        cid = self.active_id()
+        own = self.characters.device_settings(cid) if cid else {}
+        out = []
+        for extra in ({"voice": own.get("voice") or None, "provider": own.get("voice_provider") or None},
+                      {"provider": "local"}):
+            try:
+                voice = self.build("tts", **extra)
+            except Exception as error:                 # no key, no model on this machine
+                log.info("no voice for the alarm (%s): %s", extra.get("provider") or "the usual one", error)
+                continue
+            if voice is not None and all(voice is not v for v in out):
+                out.append(voice)
+        return out
+
+    async def _say_fixed(self, line):
+        """Say a line without the language model. False if no voice could say it."""
+        cid = self.active_id()
+        for voice in self._voices():
+            talker = self.conversation or Conversation(
+                llm=None, tts=voice, speaker=self.speaker, stage=self.stage, memory=self.memory(cid),
+                persona=self.characters.persona(cid) if cid else "", on_event=self._conversation_event,
+                on_caption=self._caption)
+            try:
+                reply = await talker.say_line(line, "happy", tts=voice)
+            except ProviderError as error:
+                self.emit("error", {"message": "the alarm's voice: %s" % error})
+                continue
+            if reply.spoken or reply.interrupted:
+                self.emit("replied", {"text": " ".join(reply.spoken), "interrupted": reply.interrupted, "error": None})
+                self.last_talk = time.time()
+                self.set_state("listening" if self.listening else "idle")
+                self.overlays.caption_done()
+                return True
+        return False
+
+    async def _wait_answer(self, seconds):
+        """Listen for an answer after a call. True if someone answered (they spoke, or pressed the button)."""
+        if not self.muted and self.store.settings()["listening"].get("mode", "auto") == "auto" and not self.listening:
+            self.listening = True
+            self.answer_until = time.time() + seconds
+            self.set_state("listening")
+            self.stage.state("listening")
+        try:
+            await asyncio.wait_for(self._answered.wait(), seconds)
+            return True
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            if self.listening and self.answer_until and time.time() >= self.answer_until - 0.5 \
+                    and not self._answered.is_set() and self.state == "listening":
+                self.listening, self.answer_until = False, 0.0
+                self.set_state("idle")
+                self.stage.state("idle")
+
+    def stop_ringing(self, why="stopped"):
+        """Someone answered: every alarm ringing stops. Returns whether one was."""
+        if not self.rings:
+            return False
+        if self._answered is not None:
+            self._answered.set()
+        rings, self.rings = self.rings, {}
+        for label, task in rings.items():
+            if task is not asyncio.current_task():
+                task.cancel()
+            self.emit("timer", {"label": label, "did": why})
+        if why != "answered":
+            self.interrupt()
+        self.overlays.hide(HINT)
+        return True
+
+    # ----- daily wake-ups (settings "alarms")
+    def _wake_rung_path(self):
+        return os.path.join(self.data_dir, "wake-ups.json")
+
+    def wake_step(self, now=None):
+        """Ring each daily wake-up whose time has come: on its days, once a day, and only within five minutes
+        of its time (one missed while the device was off is not rung hours late). Returns the labels rung."""
+        now = now or time.time()
+        local = datetime.datetime.fromtimestamp(now)
+        wake_ups = (self.store.settings().get("alarms") or {}).get("wake_ups") or []
+        try:
+            with open(self._wake_rung_path(), encoding="utf-8") as f:
+                rung = json.load(f)
+        except (OSError, ValueError):
+            rung = {}
+        today, out = local.date().isoformat(), []
+        for w in wake_ups:
+            try:
+                hour, minute = (int(x) for x in str(w.get("time", "")).split(":"))
+                due = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            except ValueError:
+                continue
+            key = str(w.get("id") or w.get("time"))
+            if not w.get("on", True) or local.weekday() not in (w.get("days") or range(7)) or rung.get(key) == today:
+                continue
+            if due <= local < due + datetime.timedelta(seconds=WAKE_LATE):
+                rung[key] = today
+                out.append(w.get("label") or "wake-up at %s" % w.get("time"))
+        if out:
+            write_atomic(self._wake_rung_path(), json.dumps(rung))
+            for label in out:
+                self._ring(label, "wake")
+        return out
+
+    def next_wake_up(self, now=None):
+        """The next daily wake-up: {"label", "at"} (seconds), or None."""
+        now = now or time.time()
+        local = datetime.datetime.fromtimestamp(now)
+        best = None
+        for w in (self.store.settings().get("alarms") or {}).get("wake_ups") or []:
+            if not w.get("on", True):
+                continue
+            try:
+                hour, minute = (int(x) for x in str(w.get("time", "")).split(":"))
+            except ValueError:
+                continue
+            for ahead in range(8):
+                day = local + datetime.timedelta(days=ahead)
+                at = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if at > local and day.weekday() in (w.get("days") or range(7)):
+                    if best is None or at.timestamp() < best["at"]:
+                        best = {"label": w.get("label") or "wake-up", "at": round(at.timestamp())}
+                    break
+        return best
+
+    # ----- the clock over the character (settings "clock")
+    def clock_step(self, now=None):
+        """Show, change or hide the clock over the character: the time, the date and the weather; while nobody
+        is talking ("idle") or all the time ("always"). Returns what it shows, or None."""
+        now = now or time.time()
+        settings = self.store.settings()
+        opts = settings.get("clock") or {}
+        show = opts.get("show", "off")
+        wanted = show == "always" or (show == "idle" and self._quiet() and not self.listening)
+        if HEARD in self.overlays.shown or self.screen_mode == "off" or not self.active_id() or \
+                os.path.realpath(self.current_puppet) == os.path.realpath(self.card):
+            wanted = False
+        if not wanted:
+            if self.clock_shown is not None:
+                self.overlays.hide(CLOCK)
+                self.clock_shown = None
+            return None
+        local = datetime.datetime.fromtimestamp(now)
+        hours = opts.get("hours", "auto")
+        twelve = hours == "12" or (hours == "auto" and weather_module.guess_12_hour(self.timezone()))
+        shown_time = "%d:%02d" % ((local.hour + 11) % 12 + 1, local.minute) if twelve else "%02d:%02d" % (local.hour, local.minute)
+        suffix = ("am" if local.hour < 12 else "pm") if twelve else ""
+        date = "%s %d %s" % (local.strftime("%a"), local.day, local.strftime("%b"))
+        glance = None
+        if opts.get("weather", True) and self.weather.on(settings):
+            got = self.weather.now(settings, self.timezone(), now)
+            if got:
+                glance = (got["now"]["icon"], got["now"]["temp"])
+        key = (shown_time, suffix, date, glance, tuple(self.overlays.screen))
+        if key != self.clock_shown:
+            self.overlays.clock(shown_time, suffix, date, glance)
+            self.clock_shown = key
+        return key
+
+    def cancel_timer(self, label):
+        """Cancel one timer or alarm set by voice, by its exact label. False if there is none."""
+        entry = self.timers.pop(label, None)
+        if entry is None:
+            return False
+        entry[1].cancel()
+        self._save_timers()
+        self.emit("timer", {"label": label, "did": "cancelled"})
+        return True
 
     def _save_timers(self):
         data = [{"label": k, "due": v[0], "kind": v[2]} for k, v in self.timers.items()]
@@ -1163,6 +1555,7 @@ class Device:
             "providers": {k: settings[k].get("provider", "") for k in ("llm", "stt", "tts")},
             "keys": self.store.secret_status(),
             "timers": [{"label": k, "due": round(v[0]), "kind": v[2]} for k, v in self.timers.items()],
+            "ringing": sorted(self.rings),
             "uptime": round(time.time() - self.started),
             "stage_connected": getattr(self.stage, "writer", True) is not None,
             "timezone": self.timezone(),
@@ -1293,6 +1686,48 @@ def within_hours(now, start, end):
     hour = datetime.datetime.fromtimestamp(now).hour
     start, end = int(start), int(end)
     return (start <= hour or hour < end) if start > end else (start <= hour < end)
+
+
+HOUR_WORDS = ("twelve", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven")
+FIVES = {5: "five", 10: "ten", 20: "twenty", 25: "twenty-five"}
+
+
+def time_in_words(t):
+    """A time as people say it aloud: "seven o'clock", "quarter past seven", "twenty to eight", "3 minutes past seven"."""
+    local = datetime.datetime.fromtimestamp(t)
+    hour, after, minute = HOUR_WORDS[local.hour % 12], HOUR_WORDS[(local.hour + 1) % 12], local.minute
+    if minute == 0:
+        return "%s o'clock" % hour
+    if minute in (15, 30, 45):
+        return {15: "quarter past %s" % hour, 30: "half past %s" % hour, 45: "quarter to %s" % after}[minute]
+    if minute % 5 == 0:
+        return "%s past %s" % (FIVES[minute], hour) if minute < 30 else "%s to %s" % (FIVES[60 - minute], after)
+    if minute < 30:
+        return "%d minute%s past %s" % (minute, "" if minute == 1 else "s", hour)
+    return "%d minute%s to %s" % (60 - minute, "" if minute == 59 else "s", after)
+
+
+def ring_line(kind, label, when, name="", attempt=0, weather_line=""):
+    """What the character says when an alarm rings without the language model (it failed), and when it calls again."""
+    t = time_in_words(when)
+    call, comma = (name + "! ") if name else "", (", " + name) if name else ""
+    plain = (label or "").strip().lower() in ("", "timer", "alarm", "wake up", "wake-up")
+    if kind == "wake":
+        if attempt == 0:
+            return "Good morning%s! It's %s, time to get up.%s" % (comma, t, (" " + weather_line) if weather_line else "")
+        again = ["%sTime to get up, it's %s." % (call, t), "Wakey wakey%s! It's %s." % (comma, t),
+                 "%sAre you awake? It's already %s." % (call, t), "Rise and shine%s! It's %s." % (comma, t)]
+        return again[(attempt - 1) % len(again)]
+    if kind == "timer":
+        what = "Your timer" if plain else "Your %s timer" % label
+        return "%s%s is done." % (call, what) if attempt == 0 else "%s%s has finished!" % (call, what)
+    return "%sIt's %s%s." % (call, t, "" if plain else ": time for " + label)
+
+
+def ring_hint(label, kind):
+    what = {"wake": "Wake-up", "timer": "Timer"}.get(kind, "Alarm")
+    plain = (label or "").strip().lower() in ("", "timer", "alarm", "wake up", "wake-up")
+    return "%s%s. Press the button to stop it." % (what, "" if plain else ": " + label)
 
 
 async def _run_command(*args, timeout=30):

@@ -35,15 +35,16 @@ REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
 def system_prompt(persona, remembered="", now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt"),
-                  family_safe=False):
-    """The model's instructions: the persona, how to speak, the time, and what the character remembers
-    for this reply (memory.Memory.context: the owner's notes, its memories, the last conversation ...).
+                  family_safe=False, today=""):
+    """The model's instructions: the persona, how to speak, the time, what is special about today (`today`: the
+    owner's name, special days, the weather, their plans; device.Device.today_text), and what the character
+    remembers for this reply (memory.Memory.context: the owner's notes, its memories, the last conversation ...).
     In family-safe mode, its rules follow the persona and a reminder ends the instructions."""
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
     rules = speech_rules(gestures) + ("\n" + SEARCH_RULE if search_tag else "")
     parts = [body, family.RULES if family_safe else "", rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M"),
-             (remembered or "").strip(), family.REMINDER if family_safe else ""]
+             (today or "").strip(), (remembered or "").strip(), family.REMINDER if family_safe else ""]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -64,7 +65,7 @@ class Reply:
 class Conversation:
     def __init__(self, *, llm, tts, speaker, stage, memory, persona, history_turns=12,
                  on_event=None, on_action=None, on_audio=None, search=None, gestures=None, on_caption=None,
-                 family_safe=False):
+                 family_safe=False, today=None):
         self.llm = llm
         self.tts = tts
         self.speaker = speaker
@@ -82,6 +83,8 @@ class Conversation:
         self.on_caption = on_caption
         # Family-safe mode: its rules in the instructions, and strong swearing taken out of what is said.
         self.family_safe = family_safe
+        # Called for what is special about today (special days, the weather, their plans), for the instructions.
+        self.today = today
         self.current = None
         self._task = None
         self.mood_linger = MOOD_LINGER
@@ -129,13 +132,14 @@ class Conversation:
         self.stage.state("thinking")
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
         gestures = [g for g in gestures if g not in getattr(self.stage, "disabled", ())]
+        today = self._today()
         base = system_prompt(self.persona, "", search_tag=self.search is not None, gestures=gestures,
-                             family_safe=self.family_safe)
+                             family_safe=self.family_safe, today=today)
         asked = prompt or heard
         remembered, past = self.memory.context(heard, room=self.room(len(base) + len(asked)), verbatim=self.history_turns)
         messages = past + [{"role": "user", "content": prompt or heard}]
         system = system_prompt(self.persona, remembered, search_tag=self.search is not None, gestures=gestures,
-                               family_safe=self.family_safe)
+                               family_safe=self.family_safe, today=today)
         writer = None
         try:
             queries = []
@@ -178,6 +182,16 @@ class Conversation:
             self.on_event("replied", {"text": said, "interrupted": reply.interrupted, "error": reply.error})
             self.current = None
         return reply
+
+    def _today(self):
+        """What is special about today, for the instructions; nothing if it cannot be had (never a failed reply)."""
+        if self.today is None:
+            return ""
+        try:
+            return self.today() or ""
+        except Exception:
+            log.exception("could not say what is special about today")
+            return ""
 
     async def _write(self, system, messages, sentences, reply):
         """Read the model's stream and queue up sentences to speak."""
@@ -422,6 +436,37 @@ class Conversation:
             await self.speaker.play(tone(), 24000, lambda level: None, self.on_audio)
         except Exception:
             pass
+
+    async def say_line(self, text, emotion=None, tts=None):
+        """Say a fixed line, without the language model (an alarm when the model cannot be reached), in this
+        conversation's voice or in `tts`. Returns the Reply; raises ProviderError if the voice fails."""
+        self._stop_calming()
+        reply = self.current = Reply("")
+        sentences = asyncio.Queue()
+        for item in [(text, emotion, []), None]:
+            await sentences.put(item)
+        voice = self.tts
+        if tts is not None:
+            self.tts = tts
+        try:
+            await self._speak(sentences, reply)
+        except asyncio.CancelledError:
+            reply.interrupted = True
+            self.speaker.stop()
+        finally:
+            self.tts = voice
+            self.stage.mouth(0.0)
+            self.stage.state("idle")
+            self.current = None
+            if emotion:
+                self._calm_later()
+        return reply
+
+    def speak_line(self, text, emotion=None, tts=None):
+        """say_line in the background, interruptible like a reply. Returns the task."""
+        self.interrupt()
+        self._task = asyncio.ensure_future(self.say_line(text, emotion, tts))
+        return self._task
 
     async def greet(self):
         """Say the persona's greeting, if it has one."""

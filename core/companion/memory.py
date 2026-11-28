@@ -640,6 +640,12 @@ class Memory:
                     out.append(m)
         return out
 
+    def plans_on(self, day):
+        """What they planned for a day (a date): the plans and events dated that day, not those only to ask about."""
+        iso = day.isoformat()
+        return [m["text"] for m in self.memories()
+                if m.get("when") == iso and m.get("category") == "plans and events" and not m.get("follow_up")]
+
     def _mark_asked(self, ids):
         if not ids:
             return

@@ -20,7 +20,8 @@ from companion.memory import Memory  # noqa: E402
 from fakes import FakeLLM, FakeStage, FakeTTS  # noqa: E402
 from test_package import good_files, manifest  # noqa: E402
 
-ALWAYS = {"on": True, "after_hours": 3, "quiet_from": 0, "quiet_to": 0}      # no quiet hours, for tests
+# No quiet hours, for tests; the morning hello (whatever the hour the tests run at) is tested in test_your_day.py.
+ALWAYS = {"on": True, "after_hours": 3, "quiet_from": 0, "quiet_to": 0, "morning": False}
 QUIET = array.array("h", [30, -30] * 160).tobytes()
 VOICE = array.array("h", [9000, -9000] * 160).tobytes()
 

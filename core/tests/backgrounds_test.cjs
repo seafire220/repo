@@ -34,10 +34,12 @@ const check = (name, ok, extra) => { checks.push([name, !!ok]); console.log((ok 
   }
   await page.waitForSelector("#bg-grid .bg-item");
   const shown = await page.$$eval("#bg-grid .bg-item button[data-picture]", (bs) => bs.map((b) => b.dataset.picture));
-  check("the choices are shown: with the time of day, none, and the eight built-in pictures", shown.length === 10, shown.join(" "));
+  check("the choices are shown: with the time of day, none, your pictures in turn, eight built-in and six festive pictures",
+    shown.length === 17, shown.join(" "));
+  check("the festive ones have their own heading", (await page.textContent("#bg-grid .bg-group")).includes("Festive"));
   const loaded = await page.$$eval("#bg-grid img", (imgs) => Promise.all(imgs.map((i) => i.complete && i.naturalWidth
     ? i.naturalWidth : new Promise((r) => { i.onload = () => r(i.naturalWidth); i.onerror = () => r(0); }))));
-  check("each built-in picture has its thumbnail", loaded.length === 8 && loaded.every((w) => w === 120), loaded.join(","));
+  check("each built-in and festive picture has its thumbnail", loaded.length === 14 && loaded.every((w) => w === 120), loaded.join(","));
   check("with the time of day is the default", await page.$eval(".bg-item.on button", (b) => b.dataset.picture) === "auto");
 
   await page.click("#bg-grid button[data-picture=sunset]");

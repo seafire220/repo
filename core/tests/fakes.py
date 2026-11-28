@@ -127,3 +127,42 @@ class FakeStage:
 
     def states(self):
         return [c["state"] for c in self.commands if "state" in c]
+
+
+def forecast_doc(start=None, hours=48, temps=None, symbols=None, wet=None):
+    """A made-up MET Norway Locationforecast (compact) document, hourly from `start` (seconds; to the hour before)."""
+    import datetime
+    import time
+    start = int((start or time.time()) // 3600 * 3600)
+    series = []
+    for k in range(hours):
+        t = start + k * 3600
+        series.append({
+            "time": datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "data": {"instant": {"details": {"air_temperature": temps(t) if temps else 18.0}},
+                     "next_1_hours": {"summary": {"symbol_code": symbols(t) if symbols else "partlycloudy_day"},
+                                      "details": {"precipitation_amount": wet(t) if wet else 0.0}}}})
+    return {"type": "Feature", "properties": {"meta": {"units": {"air_temperature": "celsius"}}, "timeseries": series}}
+
+
+class FakeFetch:
+    """Stands in for the internet when the weather is fetched (weather.Weather's `fetch`): answers with a made-up
+    forecast, and keeps each ask (the address and the headers)."""
+
+    def __init__(self, doc=None, status=200, expires_in=3600):
+        self.doc, self.status, self.expires_in = doc, status, expires_in
+        self.asked = []
+        self.fail = False
+
+    async def __call__(self, url, headers):
+        import email.utils
+        import json
+        import time
+        self.asked.append((url, dict(headers)))
+        if self.fail:
+            raise OSError("no internet")
+        answer = {"Expires": email.utils.formatdate(time.time() + self.expires_in, usegmt=True),
+                  "Last-Modified": "Sat, 28 Nov 2026 05:00:00 GMT"}
+        if self.status != 200:
+            return self.status, answer, b""
+        return 200, answer, json.dumps(self.doc or forecast_doc()).encode()

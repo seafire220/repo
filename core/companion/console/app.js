@@ -99,6 +99,7 @@ function show(tab) {
   for (const s of document.querySelectorAll(".tab")) s.hidden = s.id !== tab;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   if (tab === "memory") loadMemory();
+  if (tab === "day") loadDay().catch((e) => text($("day-msg"), e.message));
   if (tab === "device") {
     loadWifi().catch((e) => text($("wifi-status"), e.message));
     loadUpdate().catch((e) => text($("upd-status"), e.message));
@@ -137,7 +138,12 @@ function onEvent(e) {
   else if (e.kind === "heard") addLog("You:", e.text);
   else if (e.kind === "replied" && e.text) addLog("Character:", e.text + (e.interrupted ? " (interrupted)" : ""));
   else if (e.kind === "error" || e.kind === "stage_error") addLog("Problem:", e.message, "error");
-  else if (e.kind === "timer") addLog("Timer:", e.label + (e.did ? " " + e.did : " set"));
+  else if (e.kind === "timer") {
+    addLog(e.type === "wake" ? "Wake-up:" : e.type === "alarm" ? "Alarm:" : "Timer:", e.label + (e.did ? " " + e.did : " set"));
+    if (e.did === "rang") showRinging([e.label]);
+    if (!$("day").hidden) api("GET", "/api/day").then(showDayStatus).catch(() => {});
+    else if (e.did && e.did !== "rang") api("GET", "/api/status").then((s) => showRinging(s.ringing)).catch(() => {});
+  }
   else if (e.kind === "searching") addLog("Searching:", e.query);
   else if (e.kind === "memory" || e.kind === "replied") api("GET", "/api/status").then(setStatus).catch(() => {});
   else if (e.kind === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
@@ -568,6 +574,7 @@ function setStatus(s) {
   text($("home-state"), s.state);
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
   showMicrophone(s);
+  if (s.ringing) showRinging(s.ringing);
   if (s.storage_recovered !== undefined) $("storage-recovered").hidden = !s.storage_recovered;
   if (s.backlight !== undefined) $("dev-brightness-row").hidden = !s.backlight;
   if (s.usb) {
@@ -648,7 +655,15 @@ function showBackgrounds() {
   if (!info) return;
   const grid = $("bg-grid");
   grid.replaceChildren();
+  let festiveShown = false;
   for (const p of info.pictures) {
+    if (p.kind === "festive" && !festiveShown) {
+      const heading = document.createElement("div");
+      heading.className = "bg-group";
+      text(heading, "Festive (shown by themselves on special days, if you like: Your day tab)");
+      grid.append(heading);
+      festiveShown = true;
+    }
     const item = document.createElement("div");
     item.className = "bg-item" + (p.id === info.default.choice ? " on" : "");
     const pick = document.createElement("button");
@@ -668,7 +683,7 @@ function showBackgrounds() {
     }
     const label = document.createElement("span");
     label.className = "bg-title";
-    text(label, p.id === "auto" ? "With the time of day" : p.id === "none" ? "None" : p.title);
+    text(label, p.id === "auto" ? "With the time of day" : p.id === "none" ? "None" : p.id === "photos" ? "Your pictures, in turn" : p.title);
     pick.append(label);
     pick.addEventListener("click", () => setBackgroundDefault({ choice: p.id }));
     item.append(pick);
@@ -1562,6 +1577,256 @@ $("btn-voices").addEventListener("click", async () => {
   for (const v of r.voices) { const o = document.createElement("option"); o.value = v.id; o.label = v.name; list.append(o); }
   text($("test-tts"), r.ok ? r.voices.length + " voices found: click the Voice box to choose" : "Could not list voices: " + r.message);
 });
+
+// ----- your day: about you, the weather, wake-ups, special days, the clock (docs/28-user-guide.md, "Your day")
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+  "November", "December"];
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+let day = { place: undefined, wakeUps: [], dates: [], status: null };
+
+function monthSelect(value) {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Month");
+  select.add(new Option("month", ""));
+  MONTHS.forEach((m, i) => select.add(new Option(m, String(i + 1).padStart(2, "0"))));
+  select.value = value || "";
+  return select;
+}
+
+// "MM-DD", or "YYYY-MM-DD" with a year; "" when nothing is filled in; an Error when half of it is.
+function dateFrom(month, date, year, what) {
+  const m = month.value, d = date.value.trim(), y = year.value.trim();
+  if (!m && !d && !y) return "";
+  if (!m || !d) throw new Error(what + ": choose the month and type the day");
+  const dd = String(Number(d)).padStart(2, "0");
+  if (!(Number(d) >= 1 && Number(d) <= 31)) throw new Error(what + ": the day is a number from 1 to 31");
+  if (y && !/^\d{4}$/.test(y)) throw new Error(what + ": the year has four figures");
+  return (y ? y + "-" : "") + m + "-" + dd;
+}
+
+function datePieces(text) {
+  const t = text || "";
+  return t.length === 10 ? { y: t.slice(0, 4), m: t.slice(5, 7), d: String(Number(t.slice(8))) }
+    : t.length === 5 ? { y: "", m: t.slice(0, 2), d: String(Number(t.slice(3))) } : { y: "", m: "", d: "" };
+}
+
+function whenText(at) {
+  const t = new Date(at * 1000), now = new Date();
+  const clockText = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  return (days === 0 ? "today" : days === 1 ? "tomorrow" : WEEKDAYS[(t.getDay() + 6) % 7]) + " at " + clockText;
+}
+
+async function loadDay() {
+  const s = state.settings = await api("GET", "/api/settings");
+  const owner = s.owner || {}, weather = s.weather || {}, alarms = s.alarms || {}, special = s.special_days || {};
+  const clockOpts = s.clock || {};
+  $("day-name").value = owner.name || "";
+  const b = datePieces(owner.birthday);
+  if (!$("day-bmonth").options.length) {
+    $("day-bmonth").add(new Option("month", ""));
+    MONTHS.forEach((m, i) => $("day-bmonth").add(new Option(m, String(i + 1).padStart(2, "0"))));
+  }
+  $("day-bmonth").value = b.m; $("day-bday").value = b.d; $("day-byear").value = b.y;
+  $("day-weather").checked = !!weather.on;
+  $("day-units").value = weather.units || "auto";
+  day.place = undefined;
+  $("day-place-find").hidden = true;
+  $("day-morning").checked = (s.speak_first || {}).morning !== false;
+  $("day-repeat").checked = alarms.repeat !== false;
+  day.wakeUps = (alarms.wake_ups || []).map((w) => Object.assign({}, w));
+  day.dates = (special.dates || []).map((d) => Object.assign({}, d));
+  $("day-special").checked = special.on !== false;
+  $("day-holidays").checked = special.holidays !== false;
+  $("day-festive").checked = special.festive !== false;
+  $("day-clock").value = clockOpts.show || "off";
+  $("day-hours").value = clockOpts.hours || "auto";
+  $("day-clock-weather").checked = clockOpts.weather !== false;
+  $("day-every").value = String((s.background || {}).every || 10);
+  renderWakeUps();
+  renderDates();
+  showDayStatus(await api("GET", "/api/day"));
+}
+
+function showDayStatus(st) {
+  day.status = st;
+  if (day.place === undefined) text($("day-place"), st.place ? st.place.label : "no town yet (the time zone has none): choose one");
+  text($("day-credit"), st.credit);
+  showRinging(st.ringing);
+  text($("day-next"), st.next_wake_up ? "Next wake-up: " + whenText(st.next_wake_up.at) +
+    (st.next_wake_up.label && st.next_wake_up.label !== "wake-up" ? " (" + st.next_wake_up.label + ")" : "") + "." : "");
+  const timers = $("day-timers");
+  timers.replaceChildren();
+  for (const t of st.timers) {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    text(label, (t.kind === "timer" ? "Timer" : "Alarm") + (t.label && t.label !== t.kind ? ": " + t.label : "") + ", rings " + whenText(t.due));
+    li.append(label, button("Cancel", async () => {
+      try { showDayStatus(await api("DELETE", "/api/timers/" + encodeURIComponent(t.label))); }
+      catch (e) { text($("day-msg"), e.message); }
+    }, "small secondary"));
+    timers.append(li);
+  }
+  if (!st.timers.length) { const li = document.createElement("li"); li.className = "muted"; text(li, "None now."); timers.append(li); }
+  const today = st.specials.map((x) => x.what);
+  text($("day-today"), (today.length ? "Today: " + today.join(", ") + (st.festive ? " (with a festive background)" : "") + ". " : "") +
+    (st.arrived ? "Your character arrived on " + new Date(st.arrived + "T12:00:00").toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" }) + "." : ""));
+  if (st.weather_said && !$("day-weather-msg").textContent) text($("day-weather-msg"), st.weather_said);
+}
+
+function showRinging(ringing) {
+  const on = !!(ringing && ringing.length);
+  $("day-ringing").hidden = !on;
+  $("home-ringing").hidden = !on;
+}
+
+function renderWakeUps() {
+  const list = $("day-wakeups");
+  list.replaceChildren();
+  day.wakeUps.forEach((w, i) => {
+    const li = document.createElement("li");
+    const on = document.createElement("input"); on.type = "checkbox"; on.checked = w.on !== false; on.title = "On";
+    on.addEventListener("change", () => { w.on = on.checked; });
+    const at = document.createElement("input"); at.type = "time"; at.value = w.time || "07:00"; at.required = true;
+    at.addEventListener("change", () => { w.time = at.value; });
+    const days = document.createElement("span"); days.className = "days";
+    const chosen = new Set(w.days || [0, 1, 2, 3, 4, 5, 6]);
+    WEEKDAYS.forEach((name, k) => {
+      const l = document.createElement("label"); l.title = name;
+      const box = document.createElement("input"); box.type = "checkbox"; box.checked = chosen.has(k);
+      box.setAttribute("aria-label", name);
+      box.addEventListener("change", () => {
+        if (box.checked) chosen.add(k); else chosen.delete(k);
+        w.days = [...chosen].sort();
+      });
+      const letter = document.createElement("span"); text(letter, name.slice(0, 2));
+      l.append(box, letter);
+      days.append(l);
+    });
+    const label = document.createElement("input"); label.type = "text"; label.maxLength = 40; label.value = w.label || "";
+    label.placeholder = "what for (if you like)";
+    label.addEventListener("input", () => { w.label = label.value; });
+    li.append(on, at, days, label, button("Remove", () => { day.wakeUps.splice(i, 1); renderWakeUps(); }, "small secondary"));
+    list.append(li);
+  });
+  if (!day.wakeUps.length) { const li = document.createElement("li"); li.className = "muted"; text(li, "No wake-ups yet."); list.append(li); }
+}
+
+function renderDates() {
+  const list = $("day-dates");
+  list.replaceChildren();
+  day.dates.forEach((d, i) => {
+    const li = document.createElement("li");
+    const p = datePieces(d.date);
+    const month = monthSelect(p.m);
+    const date = document.createElement("input"); date.type = "number"; date.min = 1; date.max = 31; date.value = p.d;
+    date.placeholder = "day"; date.className = "short"; date.setAttribute("aria-label", "Day");
+    const year = document.createElement("input"); year.type = "number"; year.min = 1900; year.max = 2100; year.value = p.y;
+    year.placeholder = "year"; year.className = "short"; year.setAttribute("aria-label", "Year");
+    const what = document.createElement("input"); what.type = "text"; what.maxLength = 60; what.value = d.what || "";
+    what.placeholder = "what it is, e.g. our anniversary";
+    const onceLabel = document.createElement("label");
+    const once = document.createElement("input"); once.type = "checkbox"; once.checked = !!d.once;
+    onceLabel.append(once, document.createTextNode(" only that year"));
+    d.read = () => ({ date: dateFrom(month, date, year, "“" + (what.value.trim() || "a day") + "”"), what: what.value.trim(), once: once.checked });
+    li.append(month, date, year, what, onceLabel, button("Remove", () => { day.dates.splice(i, 1); renderDates(); }, "small secondary"));
+    list.append(li);
+  });
+  if (!day.dates.length) { const li = document.createElement("li"); li.className = "muted"; text(li, "None yet."); list.append(li); }
+}
+
+function dayChanges() {
+  const dates = [];
+  for (const d of day.dates) {
+    const r = d.read ? d.read() : d;
+    if (!r.date && !r.what) continue;
+    if (!r.date || !r.what) throw new Error("each of your own days needs a date and what it is");
+    if (r.once && r.date.length !== 10) throw new Error("“" + r.what + "” is only that year, so it needs the year");
+    dates.push(r.once ? r : { date: r.date, what: r.what });
+  }
+  for (const w of day.wakeUps) if (!w.time) throw new Error("each wake-up needs a time");
+  for (const w of day.wakeUps) if (!(w.days || [0]).length) throw new Error("each wake-up needs at least one day");
+  const changes = {
+    owner: { name: $("day-name").value.trim(), birthday: dateFrom($("day-bmonth"), $("day-bday"), $("day-byear"), "Your birthday") },
+    weather: { on: $("day-weather").checked, units: $("day-units").value },
+    speak_first: { morning: $("day-morning").checked },
+    alarms: { repeat: $("day-repeat").checked, wake_ups: day.wakeUps.map((w) => ({
+      id: w.id || Math.random().toString(16).slice(2, 10), time: w.time || "07:00",
+      days: w.days || [0, 1, 2, 3, 4, 5, 6], label: (w.label || "").trim(), on: w.on !== false })) },
+    special_days: { on: $("day-special").checked, holidays: $("day-holidays").checked, festive: $("day-festive").checked, dates },
+    clock: { show: $("day-clock").value, hours: $("day-hours").value, weather: $("day-clock-weather").checked },
+    background: { every: Number($("day-every").value) },
+  };
+  if (day.place !== undefined) changes.weather.place = day.place;
+  return changes;
+}
+
+async function saveDay() {
+  await api("PUT", "/api/settings", dayChanges());
+  await loadDay();
+}
+
+$("btn-save-day").addEventListener("click", async () => {
+  text($("day-msg"), "");
+  try { await saveDay(); text($("day-msg"), "Saved."); } catch (e) { text($("day-msg"), e.message); }
+});
+$("btn-day-add-wake").addEventListener("click", () => {
+  day.wakeUps.push({ id: Math.random().toString(16).slice(2, 10), time: "07:00", days: [0, 1, 2, 3, 4], label: "", on: true });
+  renderWakeUps();
+});
+$("btn-day-add-date").addEventListener("click", () => { day.dates.push({ date: "", what: "" }); renderDates(); });
+$("btn-day-place").addEventListener("click", () => { $("day-place-find").hidden = false; $("day-place-q").focus(); });
+$("btn-day-place-zone").addEventListener("click", () => {
+  day.place = null;
+  text($("day-place"), "the time zone's city (save to keep)");
+  $("day-place-find").hidden = true;
+});
+let placeTimer = null;
+$("day-place-q").addEventListener("input", () => {
+  clearTimeout(placeTimer);
+  placeTimer = setTimeout(async () => {
+    const list = $("day-place-list");
+    try {
+      const r = await api("GET", "/api/places?q=" + encodeURIComponent($("day-place-q").value));
+      list.replaceChildren();
+      for (const p of r.places) {
+        const li = document.createElement("li");
+        li.append(button(p.label, () => {
+          day.place = { name: p.name, label: p.label, latitude: p.latitude, longitude: p.longitude };
+          text($("day-place"), p.label + " (save to keep)");
+          $("day-place-find").hidden = true;
+          list.replaceChildren();
+        }, "secondary"));
+        list.append(li);
+      }
+      if (!r.places.length && $("day-place-q").value.trim().length > 1) {
+        const li = document.createElement("li"); li.className = "muted";
+        text(li, "No town of that name in the list (it has every town of 15,000 people or more): try the nearest larger one.");
+        list.append(li);
+      }
+    } catch (e) { text($("day-weather-msg"), e.message); }
+  }, 250);
+});
+$("btn-day-weather-check").addEventListener("click", async () => {
+  text($("day-weather-msg"), "Saving and asking MET Norway…");
+  try {
+    $("day-weather").checked = true;
+    await saveDay();
+    const st = await api("POST", "/api/weather/check");
+    showDayStatus(st);
+    text($("day-weather-msg"), st.problem || ("The character would say: " + st.weather_said));
+  } catch (e) { text($("day-weather-msg"), e.message); }
+});
+$("btn-day-try-wake").addEventListener("click", async () => {
+  text($("day-try-msg"), "");
+  try { showDayStatus(await api("POST", "/api/alarms/try")); text($("day-try-msg"), "Listen to the device. Press its button, or Stop it, to end it."); }
+  catch (e) { text($("day-try-msg"), e.message); }
+});
+async function stopAlarm() {
+  try { showRinging((await api("POST", "/api/alarms/stop")).ringing); } catch (e) { addLog("Problem:", e.message, "error"); }
+}
+$("btn-day-stop").addEventListener("click", stopAlarm);
+$("btn-home-stop").addEventListener("click", stopAlarm);
 
 // ----- device
 $("dev-family").addEventListener("change", () => {

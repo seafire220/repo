@@ -2,7 +2,8 @@
 (docs/28-user-guide.md).
 
 In it: the software's version, the board, its memory, storage and temperature; the settings (which hold no
-keys); which keys are set (not the keys); the characters (names and kinds, not their personas); how much
+keys; the owner's name, birthday, town and days of their own are left out, only whether they are set is
+kept); which keys are set (not the keys); the characters (names and kinds, not their personas); how much
 each remembers (counts, not contents); updates; and the device's recent events and service logs with every
 stored key removed and every word anyone said left out.
 """
@@ -65,7 +66,7 @@ def facts(device):
                    "temperature_c": round(int(temperature) / 1000, 1) if temperature.isdigit() else None,
                    "memory": _meminfo(),
                    "storage_gb": {"total": round(usage.total / 1e9, 1), "free": round(usage.free / 1e9, 1)}},
-        "settings": device.store.settings(),
+        "settings": private_kept_out(device.store.settings()),
         "keys_set": device.store.secret_status(),
         "characters": characters,
         "active": device.active_id(),
@@ -80,7 +81,10 @@ def events(device):
     for event in device.log:
         if event.get("kind") in SPOKEN:
             continue
-        out.append({k: v for k, v in event.items() if k not in ("text", "words", "heard", "reply")})
+        kept = {k: v for k, v in event.items() if k not in ("text", "words", "heard", "reply")}
+        if event.get("kind") == "timer" and "label" in kept:
+            kept["label"] = "(a label)"          # the owner's own words ("the dentist")
+        out.append(kept)
     return out
 
 
@@ -94,6 +98,21 @@ def journal(device, lines=400):
     except (OSError, subprocess.TimeoutExpired):
         text = ""
     return redact(text, device.store) or "(the service logs could not be read)"
+
+
+def private_kept_out(settings):
+    """The settings without what is personal: the owner's name and birthday, the weather's town (where they live),
+    and their own special days; whether each is set is kept, and how many wake-ups there are and when."""
+    out = json.loads(json.dumps(settings))
+    owner = out.get("owner") or {}
+    out["owner"] = {k: bool(owner.get(k)) for k in ("name", "birthday")}
+    weather = out.get("weather") or {}
+    weather["place"] = "chosen" if weather.get("place") else "the time zone's city"
+    special = out.get("special_days") or {}
+    special["dates"] = len(special.get("dates") or [])
+    alarms = out.get("alarms") or {}
+    alarms["wake_ups"] = [{k: w.get(k) for k in ("time", "days", "on")} for w in alarms.get("wake_ups") or []]
+    return out
 
 
 def report(device):

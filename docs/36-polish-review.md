@@ -2,8 +2,9 @@
 
 Status: 2026-11-28. The owner asked for a pass through the project against its original goals and earlier
 plans, with ideas from comparable products. The first review was `33-finishing.md` (2026-11-20); everything
-it marked "strongly recommended" has been built. **Backgrounds** were built in this round (D-073). The rest
-below is a list to choose from, most worthwhile first.
+it marked "strongly recommended" has been built. **Backgrounds** were built in this round (D-073); then the
+owner chose 3, 4 and 5 below, now built as **Your day** (D-074), and saved touch reactions (2) for later. The
+rest below is a list to choose from, most worthwhile first.
 
 ## Against the original goals
 
@@ -58,9 +59,9 @@ Sizes are rough: small is a day or two, medium about a week, large several.
 |---|---|---|---|---|
 | 1 | ~~Backgrounds~~ | A character in a scene, not on black | done | D-073; eight built-in pictures, the owner's own, by the time of day |
 | 2 | **Touch reactions** | Every comparable product has them; the screen is a touch screen already | small–medium | A pat on the head (it smiles, laughs), a poke (surprise, "hey!"), a tap to wake it from dozing, a long press for the mute. 2D characters by their parts; 3D by where the bones are on screen. The button keeps working (touch stays optional, A9) |
-| 3 | **A morning hello with the weather, and wake-up alarms it says itself** | Daily-life use, like Gatebox and Desktop Mate | small–medium | Weather from Open-Meteo (free, no key, by the time zone's place or a town the owner types); the alarm is the character calling your name, then louder; the button snoozes. Ties in with speaking first and the plans it remembers |
-| 4 | **Special days** | Delight, and a reason to come back | small | The owner's birthday, the character's own "day it arrived", holidays: a greeting, a gesture, a festive background |
-| 5 | **A clock, or a photo frame, while nobody is talking** | The device is useful at a glance even when quiet | small | A clock over the character (the captions' layer), or the owner's pictures as slowly changing backgrounds |
+| 3 | ~~A morning hello with the weather, and wake-up alarms it says itself~~ | Daily-life use, like Gatebox and Desktop Mate | done | D-074; the weather from MET Norway (Open-Meteo's free service is for non-commercial use only), the town from a list on the device; the alarm is the character calling your name, then louder; the button stops it and it listens |
+| 4 | ~~Special days~~ | Delight, and a reason to come back | done | D-074; birthday, the day it arrived and its hundredth day, your own days, seven holidays; six festive backgrounds |
+| 5 | ~~A clock, or a photo frame, while nobody is talking~~ | The device is useful at a glance even when quiet | done | D-074; a clock with the date and the weather at the top; your pictures in turn as the background |
 | 6 | **Moving to music** | The CODE27 dances; it reads as "alive" | medium | Find the beat in what the microphone hears; bob, sway or dance in time (built-in clips for 3D avatars) |
 | 7 | **Closeness that grows** | Relationship progression, as in Grok's companions, without the manipulation | medium | Time spent and kind words make it more familiar (a nickname, inside jokes, new idle actions). Nothing locked behind it; it never pressures; family-safe mode keeps it plain |
 | 8 | **Outfits** | Variety and seasons | medium (needs art) | 3D: a second avatar file per outfit, switched by the hour or the season; 2D: alternate drawings from Character Studio once that workflow exists |
@@ -78,9 +79,8 @@ Still needed before selling, unchanged from `33-finishing.md`: a run on the real
 address, the power-cut test, an original character in the box, code signing for Character Studio, the
 paperwork (the lawyer questions, compliance marks, privacy statement, warranty) and a quick-start card.
 
-**Recommended next:** touch reactions (2), the morning hello and spoken alarms (3), special days (4) and
-the clock or photo frame (5). They are small, buyers notice them in the first days, and they need nothing
-the hardware lacks. Then moving to music (6).
+**Recommended next:** touch reactions (2), saved for later by the owner; then moving to music (6). (The
+morning hello and spoken alarms, special days, and the clock and photo frame were built: D-074.)
 
 ## Sources
 

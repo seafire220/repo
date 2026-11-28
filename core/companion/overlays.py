@@ -1,5 +1,5 @@
-"""Pictures shown over the character: captions, what it heard, the microphone-off sign, and hints while
-the button is held (docs/28-user-guide.md).
+"""Pictures shown over the character: captions, what it heard, the microphone-off sign, hints while the
+button is held or an alarm rings, and the clock with the date and the weather (docs/28-user-guide.md).
 
 The stage draws them (stage/src/overlay.rs). The core makes each one as a PNG, sized for the screen the
 stage reports, in the overlay folder beside the stage's socket: /run/companion/overlays on the device,
@@ -8,6 +8,7 @@ which is in memory, so captions never wear the card. Then it names the picture i
 import asyncio
 import io
 import itertools
+import math
 import os
 
 from PIL import Image, ImageDraw, ImageFont
@@ -15,8 +16,8 @@ from PIL import Image, ImageDraw, ImageFont
 from .store import write_atomic
 
 # Slots, and where each sits on the screen.
-CAPTION, HEARD, MIC, HINT = "caption", "heard", "mic-off", "hint"
-ANCHORS = {CAPTION: "bottom", HEARD: "top", MIC: "top_right", HINT: "center"}
+CAPTION, HEARD, MIC, HINT, CLOCK = "caption", "heard", "mic-off", "hint", "clock"
+ANCHORS = {CAPTION: "bottom", HEARD: "top", MIC: "top_right", HINT: "center", CLOCK: "top_left"}
 LINES_PER_PAGE = 3
 CHARS_PER_SECOND = 14.0       # how fast the device's voices speak, roughly, at speed 1
 CAPTION_LINGER = 3.0          # seconds a caption stays after the character stops talking
@@ -147,6 +148,121 @@ def mic_off_png(screen=(720, 1280)):
     return out.getvalue()
 
 
+SUN, MOON = (255, 210, 90, 255), (232, 230, 242, 255)
+CLOUD, DARK_CLOUD = (236, 238, 244, 255), (176, 182, 198, 255)
+RAIN, BOLT = (120, 178, 255, 255), (255, 214, 64, 255)
+
+
+def weather_icon(kind, size):
+    """A small picture of the weather, drawn here (a sun or moon, clouds, rain, snow, lightning, fog), as RGBA.
+    `kind` is weather.symbol's picture: clear, fair, partly (each with -night), cloud, rain, snow, thunder, fog."""
+    s = 4
+    big = size * s
+    layers = []
+
+    def layer():
+        im = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+        layers.append(im)
+        return ImageDraw.Draw(im)
+
+    def sun(cx, cy, r):
+        d = layer()
+        for k in range(8):
+            a = math.pi * k / 4
+            d.line([(cx + math.cos(a) * r * 1.35, cy + math.sin(a) * r * 1.35),
+                    (cx + math.cos(a) * r * 1.8, cy + math.sin(a) * r * 1.8)], fill=SUN, width=max(2, round(r * 0.22)))
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=SUN)
+
+    def moon(cx, cy, r):
+        d = layer()
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=MOON)
+        d.ellipse((cx - r * 0.35, cy - r * 1.15, cx + r * 1.65, cy + r * 0.85), fill=(0, 0, 0, 0))   # the crescent
+
+    def cloud(cx, cy, w, colour):
+        d = layer()
+        h = w * 0.5
+        d.rounded_rectangle((cx - w / 2, cy - h * 0.15, cx + w / 2, cy + h / 2), radius=h * 0.33, fill=colour)
+        for dx, dy, r in ((-0.22, 0.02, 0.21), (0.06, -0.12, 0.29), (0.3, 0.06, 0.18)):
+            d.ellipse((cx + dx * w - r * w, cy + dy * w - r * w, cx + dx * w + r * w, cy + dy * w + r * w), fill=colour)
+
+    night = kind.endswith("-night")
+    base = kind[:-6] if night else kind
+    light = moon if night else sun
+    if base == "clear":
+        light(big * 0.5, big * 0.5, big * (0.3 if night else 0.24))
+    elif base in ("fair", "partly"):
+        light(big * 0.42, big * 0.4, big * (0.25 if night else 0.2))
+        cloud(big * 0.6, big * 0.64, big * (0.5 if base == "fair" else 0.66), CLOUD)
+    elif base == "fog":
+        d = layer()
+        for k, y in enumerate((0.36, 0.52, 0.68)):
+            inset = 0.12 if k % 2 else 0.2
+            d.rounded_rectangle((big * inset, big * y - big * 0.045, big * (1 - inset), big * y + big * 0.045),
+                                radius=big * 0.045, fill=DARK_CLOUD)
+    else:
+        wet = base in ("rain", "snow", "thunder")
+        cloud(big * 0.5, big * (0.38 if wet else 0.5), big * 0.8, DARK_CLOUD if wet else CLOUD)
+        d = layer()
+        if base == "rain":
+            for x in (0.3, 0.5, 0.7):
+                d.line([(big * x, big * 0.7), (big * (x - 0.06), big * 0.88)], fill=RAIN, width=round(big * 0.07))
+        elif base == "snow":
+            for x, y in ((0.3, 0.74), (0.5, 0.86), (0.7, 0.74)):
+                r = big * 0.055
+                d.ellipse((big * x - r, big * y - r, big * x + r, big * y + r), fill=(250, 250, 255, 255))
+        elif base == "thunder":
+            d.polygon([(big * 0.54, big * 0.6), (big * 0.4, big * 0.8), (big * 0.5, big * 0.8), (big * 0.44, big * 0.97),
+                       (big * 0.64, big * 0.72), (big * 0.53, big * 0.72), (big * 0.6, big * 0.6)], fill=BOLT)
+    out = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    for im in layers:
+        out = Image.alpha_composite(out, im)
+    return out.resize((size, size), Image.LANCZOS)
+
+
+def clock_png(shown_time, suffix="", date="", glance=None, screen=(720, 1280)):
+    """The clock: the time large, with "am" or "pm"; under it the date and, with `glance` (picture, degrees),
+    the weather. A see-through dark box behind, so it reads over any background."""
+    side = min(screen)
+    big_size = max(28, round(side * 0.115))
+    small_size = max(14, round(side * 0.045))
+    big, small, little = _font(big_size), _font(small_size, bold=False), _font(max(12, round(big_size * 0.3)))
+    measure = ImageDraw.Draw(Image.new("L", (1, 1)))
+    _, top, _, _ = big.getbbox(shown_time, anchor="ls")
+    gap = round(big_size * 0.08)
+    time_width = measure.textlength(shown_time, font=big) + (gap + measure.textlength(suffix, font=little) if suffix else 0)
+    icon = round(small_size * 1.45)
+    degrees = ("%d°" % glance[1]).replace("-", "\u2212") if glance else ""
+    line_width = measure.textlength(date, font=small)
+    if glance:
+        line_width += round(small_size * 0.7) + icon + round(small_size * 0.2) + measure.textlength(degrees, font=small)
+    pad_x, pad_y = round(small_size * 0.8), round(small_size * 0.55)
+    width = round(max(time_width, line_width)) + 2 * pad_x
+    baseline = pad_y - top
+    second = baseline + round(small_size * 0.6)               # the top of the second line
+    height = second + max(icon, round(small_size * 1.25)) + pad_y
+    scale = 2
+    image = Image.new("RGBA", (width * scale, height * scale), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rounded_rectangle((0, 0, width * scale - 1, height * scale - 1),
+                                            radius=round(small_size * 0.7) * scale, fill=(14, 14, 20, 150))
+    image = image.resize((width, height), Image.LANCZOS)
+    draw = ImageDraw.Draw(image)
+    white = (248, 248, 250, 255)
+    draw.text((pad_x, baseline), shown_time, font=big, fill=white, anchor="ls")
+    if suffix:
+        draw.text((pad_x + measure.textlength(shown_time, font=big) + gap, baseline), suffix, font=little,
+                  fill=(214, 216, 226, 255), anchor="ls")
+    middle = second + max(icon, round(small_size * 1.25)) / 2
+    draw.text((pad_x, middle), date, font=small, fill=(226, 228, 236, 255), anchor="lm")
+    if glance:
+        x = pad_x + measure.textlength(date, font=small) + round(small_size * 0.7)
+        picture = weather_icon(glance[0], icon)
+        image.alpha_composite(picture, (round(x), round(middle - icon / 2)))
+        draw.text((x + icon + round(small_size * 0.2), middle), degrees, font=small, fill=(226, 228, 236, 255), anchor="lm")
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
 class Overlays:
     """What shows over the character, through the stage."""
 
@@ -254,3 +370,6 @@ class Overlays:
             self.show(MIC, mic_off_png(self.screen))
         else:
             self.hide(MIC)
+
+    def clock(self, shown_time, suffix="", date="", glance=None):
+        self.show(CLOCK, clock_png(shown_time, suffix, date, glance, self.screen))

@@ -35,7 +35,9 @@ DEFAULT_SETTINGS = {
     "volume": 0.8,
     # Speaking first (docs/31-memory.md): when someone seems to be back after `after_hours`, the character
     # greets them, outside quiet hours (from `quiet_from` to `quiet_to` o'clock). Off unless the owner turns it on.
-    "speak_first": {"on": False, "after_hours": 3, "quiet_from": 22, "quiet_to": 8},
+    # `morning`: the first time it hears someone in the morning, it says good morning with the weather and the
+    # day's plans (docs/28-user-guide.md, "Your day").
+    "speak_first": {"on": False, "after_hours": 3, "quiet_from": 22, "quiet_to": 8, "morning": True},
     # Software updates (docs/32-updates.md): look for them now and then, and install them at night.
     "updates": {"check": True, "auto_install": True},
     # What the character says, written on the screen; `heard` also shows what it heard; `size` is
@@ -60,8 +62,29 @@ DEFAULT_SETTINGS = {
     # The picture behind every character (backgrounds.py), unless a character has its own: a built-in one,
     # "auto" (changing with the time of day), "none" (the plain colour) or one the owner added. `dim` makes
     # it darker so the character stands out; `parallax`: it moves a little as the character turns.
-    "background": {"choice": "auto", "dim": 0.0, "parallax": True},
+    # `every`: minutes between pictures, for "photos" (the owner's pictures in turn, while nobody is talking).
+    "background": {"choice": "auto", "dim": 0.0, "parallax": True, "every": 10},
+    # The owner (docs/28-user-guide.md, "Your day"): what the character calls them, and their birthday ("MM-DD",
+    # or "YYYY-MM-DD" to know their age).
+    "owner": {"name": "", "birthday": ""},
+    # The weather (weather.py), for the morning hello, wake-ups and the clock: off unless the owner turns it on.
+    # `place`: the town chosen on the settings page (None or {} for the time zone's city); `units`: "auto",
+    # "celsius" or "fahrenheit".
+    "weather": {"on": False, "place": {}, "units": "auto"},
+    # Daily wake-ups ({"id", "time": "HH:MM", "days": [0-6, Monday first], "label", "on"}), which the character
+    # says itself; `repeat`: it calls again, a little louder each time, until someone answers (up to five times).
+    "alarms": {"wake_ups": [], "repeat": True},
+    # Special days (special_days.py): the owner's birthday, each character's arrival day, holidays, and the
+    # owner's own dates ({"date": "MM-DD" or "YYYY-MM-DD", "what", "once"}: every year, counting the years when
+    # the year is given, or with `once` only that day); `festive`: a festive background all that day.
+    "special_days": {"on": True, "holidays": True, "festive": True, "dates": []},
+    # A clock over the character, with the date and the weather: `show` "off", "idle" (while nobody is talking)
+    # or "always"; `hours` "auto", "12" or "24".
+    "clock": {"show": "off", "hours": "auto", "weather": True},
 }
+
+MAX_WAKE_UPS = 10
+MAX_DATES = 30
 
 # The secret names the device accepts: one key per provider.
 SECRET_NAMES = (
@@ -137,6 +160,7 @@ class Store:
                                   or not low <= first[name] <= high):
                 raise ValueError("speak_first.%s must be a number from %s to %s" % (name, low, high))
         _check_choices(changes)
+        _check_days(changes)
         with self._lock:
             merged = _merge(self.settings(), changes)
             write_atomic(self.settings_path, json.dumps(merged, indent=1))
@@ -213,9 +237,15 @@ def _check_choices(changes):
 
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
                         ("family_safe", "on"), ("wake_word", "on"), ("live", "camera"), ("live", "mirror"),
-                        ("live", "flip"), ("background", "parallax")):
+                        ("live", "flip"), ("background", "parallax"), ("speak_first", "morning"), ("weather", "on"),
+                        ("alarms", "repeat"), ("special_days", "on"), ("special_days", "holidays"),
+                        ("special_days", "festive"), ("clock", "weather")):
         switch(group, name)
     number("background", "dim", 0, 0.8)
+    number("background", "every", 1, 240)
+    choice("weather", "units", ("auto", "celsius", "fahrenheit"))
+    choice("clock", "show", ("off", "idle", "always"))
+    choice("clock", "hours", ("auto", "12", "24"))
     picked = (changes.get("background") or {}).get("choice")
     if picked is not None and (not isinstance(picked, str) or not re.fullmatch(r"[a-z0-9_]{1,48}", picked)):
         raise ValueError("background.choice must be the name of a background")
@@ -236,6 +266,73 @@ def _check_choices(changes):
         letters = phrase.replace(" ", "").replace("'", "").replace("-", "")
         if letters and not letters.isalpha():
             raise ValueError("the wake phrase can only have letters")
+
+
+def _date_ok(text, year_needed=False):
+    """"MM-DD" (every year; 02-29 allowed) or "YYYY-MM-DD" (a real date)."""
+    import datetime
+    if not isinstance(text, str):
+        return False
+    if re.fullmatch(r"\d{2}-\d{2}", text) and not year_needed:
+        text = "2000-" + text                     # a leap year: 29 February is a birthday too
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return False
+    try:
+        return 1900 <= datetime.date.fromisoformat(text).year <= 2200
+    except ValueError:
+        return False
+
+
+def _short_text(value, limit):
+    return isinstance(value, str) and len(value) <= limit and all(c.isprintable() for c in value)
+
+
+def _check_days(changes):
+    """The owner, the weather's place, wake-ups and special days."""
+    owner = changes.get("owner") or {}
+    if "name" in owner and not _short_text(owner["name"], 40):
+        raise ValueError("owner.name must be a name of up to 40 letters")
+    if "birthday" in owner and owner["birthday"] != "" and not _date_ok(owner["birthday"]):
+        raise ValueError("owner.birthday must be a date: MM-DD, or YYYY-MM-DD")
+    weather = changes.get("weather") or {}
+    if "place" in weather and weather["place"] not in (None, {}):
+        place = weather["place"]
+        if not isinstance(place, dict) or not _short_text(place.get("name", ""), 80) or \
+                not _short_text(place.get("label", ""), 160):
+            raise ValueError("weather.place must be a town from the list")
+        for key, limit in (("latitude", 90), ("longitude", 180)):
+            value = place.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not -limit <= value <= limit:
+                raise ValueError("weather.place.%s must be a number from -%d to %d" % (key, limit, limit))
+    wake_ups = (changes.get("alarms") or {}).get("wake_ups")
+    if wake_ups is not None:
+        if not isinstance(wake_ups, list) or len(wake_ups) > MAX_WAKE_UPS:
+            raise ValueError("alarms.wake_ups must be a list of at most %d wake-ups" % MAX_WAKE_UPS)
+        for w in wake_ups:
+            if not isinstance(w, dict) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(w.get("time", ""))):
+                raise ValueError("each wake-up needs a time, HH:MM")
+            days = w.get("days", list(range(7)))
+            if not isinstance(days, list) or not days or len(set(days)) != len(days) or \
+                    any(isinstance(d, bool) or not isinstance(d, int) or not 0 <= d <= 6 for d in days):
+                raise ValueError("a wake-up's days must be numbers from 0 (Monday) to 6 (Sunday)")
+            if not _short_text(w.get("label", ""), 40) or not isinstance(w.get("on", True), bool):
+                raise ValueError("a wake-up's label must be a few words, and on true or false")
+            if not re.fullmatch(r"[a-z0-9]{1,16}", str(w.get("id") or "x")):
+                raise ValueError("a wake-up's id must be a few letters or digits")
+            w.setdefault("id", pysecrets.token_hex(4))
+            w.setdefault("days", list(range(7)))
+            w.setdefault("on", True)
+            w.setdefault("label", "")
+    dates = (changes.get("special_days") or {}).get("dates")
+    if dates is not None:
+        if not isinstance(dates, list) or len(dates) > MAX_DATES:
+            raise ValueError("special_days.dates must be a list of at most %d days" % MAX_DATES)
+        for d in dates:
+            if not isinstance(d, dict) or not _date_ok(d.get("date")) or not _short_text(d.get("what", ""), 60) \
+                    or not str(d.get("what", "")).strip():
+                raise ValueError("each special day needs a date (MM-DD or YYYY-MM-DD) and what it is")
+            if not isinstance(d.get("once", False), bool) or (d.get("once") and not _date_ok(d["date"], True)):
+                raise ValueError("a day that comes only once needs its year (YYYY-MM-DD)")
 
 
 def redact(text, store):

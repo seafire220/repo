@@ -1071,3 +1071,36 @@ rejected. Settled entries are not reopened without new evidence.
 - Rejected: shipping photos or drawings from elsewhere (licences, and D-024); moving pictures (video
   backgrounds), until frame rates on the Pi are measured.
 
+## D-074 — Your day: the weather, spoken alarms, special days, a clock and a photo frame
+
+- Date: 2026-11-28
+- Decision: the owner chose items 3, 4 and 5 of `36-polish-review.md` (touch reactions are saved for later).
+  - **Weather from MET Norway's Locationforecast** (`core/companion/weather.py`): free for products that are
+    sold, with credit (CC BY 4.0); the device names itself and its makers (the maker's website from
+    `notices/product.json`, else the project's page), rounds the position to two decimals, respects the
+    service's expiry times and If-Modified-Since, asks at most every 30 minutes and only when the weather will
+    be said or shown, and keeps the last forecast for six hours. Off until the owner turns it on.
+  - **The town is chosen from a list on the device** (`core/companion/data/places.tsv.gz`, 34,000 towns of
+    15,000 people or more from GeoNames, CC BY 4.0, made by `core/tools/make_places.py`), so what the owner
+    types never leaves the device; until then, the time zone's main city from the system's time zone tables.
+  - **The morning hello** is speaking first's first greeting of the morning, with the weather and the day's
+    plans from memory; **today's context** (the owner's name, special days, the weather, plans dated today) is
+    in every reply's instructions.
+  - **Alarms and timers are said by the character**: the first call from the language model, later ones (and
+    any when the model fails) in set words, in the character's voice, else the device's own voice, else tones;
+    up to five calls a minute apart, louder each time (timers three, half a minute apart, no louder). The
+    button or any answer stops it; then it listens. **Daily wake-ups** are settings, rung once a day within
+    five minutes of their time.
+  - **Special days** (`special_days.py`): the owner's birthday, each character's arrival day (kept from
+    install) and hundredth day, the owner's own days, and seven holidays (Easter worked out each year); a line
+    in the instructions, and one of six **festive backgrounds** drawn in code for the day.
+  - **A clock overlay** (time, date, weather drawn on the device) at the top left while nobody is talking, or
+    always; **the photo frame** is the background choice "photos" (the owner's pictures in turn, changed only
+    while nobody is talking).
+- Why: daily-life use is what comparable products (Gatebox, Desktop Mate) offer beyond conversation, and
+  the owner asked for these.
+- Rejected: **Open-Meteo**'s free service (its terms keep it for non-commercial use; its paid plan needs a key
+  per seller); **an online town search** (Nominatim's policy and privacy: the list on the device needs
+  neither); **ringing forever** (five calls, then it stops and notes it, so a device in an empty house is not
+  heard all day); **holidays of every country** (the owner adds their own days instead; more can come with
+  other languages).

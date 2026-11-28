@@ -14,6 +14,7 @@
     <button data-tab="home" class="on">Home</button>
     <button data-tab="characters">Characters</button>
     <button data-tab="memory">Memory</button>
+    <button data-tab="day">Your day</button>
     <button data-tab="services">AI services</button>
     <button data-tab="animation">Animation</button>
     <button data-tab="device">Device</button>
@@ -46,6 +47,8 @@
         <p>State: <strong id="home-state">idle</strong></p>
         <p id="home-muted" class="notice" hidden>The microphone is off: nothing is heard or recorded.
           <button type="button" id="btn-unmute" class="small">Turn it on</button></p>
+        <p id="home-ringing" class="notice ring" hidden>An alarm is ringing.
+          <button type="button" id="btn-home-stop" class="small">Stop it</button></p>
         <p><button id="btn-listen">Start listening</button> <button id="btn-interrupt">Stop speaking</button></p>
       </div>
     </div>
@@ -278,6 +281,73 @@
     <ol id="mem-diary" class="log"></ol>
 
     <p><button id="btn-clear-memory" class="danger">Forget everything</button></p>
+  </section>
+
+  <section id="day" class="tab" hidden>
+    <h2>Your day</h2>
+    <p id="day-ringing" class="notice ring" hidden>An alarm is ringing. <button type="button" id="btn-day-stop">Stop it</button></p>
+    <h3>About you</h3>
+    <label>Your name, as the character calls you <input id="day-name" maxlength="40" autocomplete="off"></label>
+    <div class="row date-row">Your birthday
+      <select id="day-bmonth" aria-label="Month"></select>
+      <input type="number" id="day-bday" min="1" max="31" placeholder="day" aria-label="Day">
+      <input type="number" id="day-byear" min="1900" max="2100" placeholder="year (if you like)" aria-label="Year"></div>
+
+    <h3>Weather</h3>
+    <label><input type="checkbox" id="day-weather"> Know the weather: the character mentions it when it says good
+      morning and wakes you, shows it with the clock, and can answer about it</label>
+    <p>For <strong id="day-place">…</strong> <button type="button" class="small secondary" id="btn-day-place">Change</button></p>
+    <div id="day-place-find" hidden>
+      <label>Your town (or the nearest larger one) <input id="day-place-q" autocomplete="off" placeholder="start typing, e.g. Perth"></label>
+      <ul id="day-place-list" class="choices"></ul>
+      <button type="button" class="small secondary" id="btn-day-place-zone">Use the time zone's city instead</button>
+    </div>
+    <label>Temperatures in <select id="day-units"><option value="auto">the usual way here</option>
+      <option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
+    <p><button type="button" class="secondary" id="btn-day-weather-check">Save and check the weather</button>
+      <span id="day-weather-msg"></span></p>
+    <p class="muted">The towns are a list kept on the device, so what you type is not sent anywhere. For the forecast,
+      only your town's position, to about a kilometre, is sent. <span id="day-credit"></span></p>
+
+    <h3>Mornings</h3>
+    <label><input type="checkbox" id="day-morning"> Good morning: the first time it hears you each morning, it says good
+      morning, with the weather and your plans for the day (this needs "Speak first", on the Device tab)</label>
+
+    <h3>Wake-up alarms</h3>
+    <p class="muted">The character wakes you itself, in its own words: the time, the weather and your plans. Press the
+      device's button, or answer it, to stop it. You can also ask it for alarms and timers by voice ("wake me at 7").</p>
+    <ul id="day-wakeups" class="rows"></ul>
+    <p><button type="button" class="small secondary" id="btn-day-add-wake">Add a wake-up</button>
+      <button type="button" class="small secondary" id="btn-day-try-wake">Try one now</button> <span id="day-try-msg"></span></p>
+    <label><input type="checkbox" id="day-repeat"> If I don't answer, call again a little louder (up to five times)</label>
+    <p id="day-next" class="muted"></p>
+    <h4>Set by voice</h4>
+    <ul id="day-timers" class="rows"></ul>
+
+    <h3>Special days</h3>
+    <label><input type="checkbox" id="day-special"> Special days: it wishes you well on your birthday, on the day it
+      arrived (each year, and its hundredth day), and on your own days below</label>
+    <label><input type="checkbox" id="day-holidays"> …holidays too: New Year, Valentine's Day, Easter, Halloween and Christmas</label>
+    <label><input type="checkbox" id="day-festive"> …with a festive background all that day</label>
+    <p id="day-today" class="muted"></p>
+    <h4>Your own days</h4>
+    <ul id="day-dates" class="rows"></ul>
+    <p><button type="button" class="small secondary" id="btn-day-add-date">Add a day</button></p>
+
+    <h3>Clock</h3>
+    <label>A clock over the character, with the date <select id="day-clock"><option value="off">never</option>
+      <option value="idle">while nobody is talking</option><option value="always">all the time</option></select></label>
+    <label>…as <select id="day-hours"><option value="auto">the usual way here</option><option value="12">7:30 pm</option>
+      <option value="24">19:30</option></select></label>
+    <label><input type="checkbox" id="day-clock-weather"> …and the weather (when the weather is on)</label>
+
+    <h3>Photo frame</h3>
+    <p class="muted">To show the pictures you added one after another, choose "Your pictures, one after another" as the
+      background on the Characters tab. They change only while nobody is talking.</p>
+    <label>A new picture every <select id="day-every"><option value="1">minute</option><option value="5">5 minutes</option>
+      <option value="10">10 minutes</option><option value="30">30 minutes</option><option value="60">hour</option></select></label>
+
+    <p><button id="btn-save-day">Save</button> <span id="day-msg"></span></p>
   </section>
 
   <section id="services" class="tab" hidden>

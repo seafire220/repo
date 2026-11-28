@@ -105,7 +105,13 @@ class SupportTest(unittest.TestCase):
     def test_the_report_tells_what_helps_and_nothing_private(self):
         with tempfile.TemporaryDirectory() as a:
             d = furnished(a)
+            d.store.update_settings({"owner": {"name": "Wilhelmina", "birthday": "1990-03-17"},
+                                     "weather": {"place": {"name": "Tumbleton", "label": "Tumbleton, Somewhere",
+                                                           "latitude": 12.34, "longitude": 56.78}},
+                                     "special_days": {"dates": [{"date": "06-03", "what": "our wedding day"}]},
+                                     "alarms": {"wake_ups": [{"time": "06:45", "label": "gym with Jo"}]}})
             d.emit("heard", {"text": "my secret diary entry"})
+            d.emit("timer", {"label": "gym with Jo", "did": "rang", "type": "wake"})
             d.emit("error", {"message": "the language model refused the key %s" % KEY})
             data = support.report(d)
             with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -119,6 +125,10 @@ class SupportTest(unittest.TestCase):
             self.assertNotIn(b"my secret diary entry", everything)
             self.assertNotIn(b"oolong", everything, "no memories, only how many")
             self.assertNotIn(b"Call me Sam", everything)
+            for private in (b"Wilhelmina", b"1990-03-17", b"Tumbleton", b"56.78", b"our wedding day", b"gym with Jo"):
+                self.assertNotIn(private, everything, "the owner's name, birthday, town and own days are left out")
+            self.assertEqual(report["settings"]["owner"], {"name": True, "birthday": True})
+            self.assertEqual(report["settings"]["alarms"]["wake_ups"][0]["time"], "06:45")
 
 
 class PageTest(unittest.IsolatedAsyncioTestCase):

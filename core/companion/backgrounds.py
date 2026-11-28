@@ -4,7 +4,11 @@ The built-in backgrounds are drawn here, in code (soft gradients, lights, stars,
 nothing copied from anywhere), the first time each is wanted, and kept in DATA/backgrounds/builtin. The
 owner can add pictures of their own: each is turned upright, made no larger than the screen needs (1920
 pixels on its long side), stripped of the details a camera stores with a photo (where it was taken among
-them) and kept as a JPEG in DATA/backgrounds.
+them) and kept as a JPEG in DATA/backgrounds. "photos" shows them one after another, like a photo frame (a new
+one every few minutes, while nobody is talking to the character).
+
+Festive pictures (balloons, fireworks, hearts, a friendly Halloween night, snowy lights, spring) are drawn the
+same way; on a special day (special_days.py) one is shown all day, unless the owner turned that off.
 
 One choice is the device's default (the settings' "background"); a character can have its own instead
 (its device settings). "auto" follows the time of day: a soft morning, a clear sky, a sunset, a starry
@@ -32,9 +36,22 @@ BUILTIN = {
     "blossom": "Blossom",
     "paper": "Paper",
 }
+# The festive pictures, for special days (and to choose, like the others).
+FESTIVE = {
+    "party": "Party",
+    "fireworks": "Fireworks",
+    "hearts": "Hearts",
+    "spooky": "Halloween night",
+    "snowy": "Snowy lights",
+    "spring": "Spring",
+}
 # The time of day's picture, for "auto" (parts of the day as memory.part_of_day names them).
 AUTO = {"morning": "dawn", "afternoon": "day", "evening": "sunset", "night": "night"}
-SPECIAL = {"auto": "Changes with the time of day", "none": "None (a plain dark colour)"}
+SPECIAL = {"auto": "Changes with the time of day", "none": "None (a plain dark colour)",
+           "photos": "Your pictures, one after another"}
+# Each drawn picture's random numbers, fixed so it looks the same on every device.
+SEEDS = {name: i + 101 for i, name in enumerate(sorted(BUILTIN))}
+SEEDS.update({name: i + 201 for i, name in enumerate(FESTIVE)})
 SIZE = (1080, 1920)
 LONGEST = 1920
 MAX_BYTES = 20 << 20
@@ -252,15 +269,230 @@ def _paper(w, h, rng):
     return _finish(canvas, rng, 1.4)
 
 
+def _layers(base, w, h, rng, groups, draw_one):
+    """Shapes over a picture in layers, the far ones blurred: `groups` is [(blur, count, size range)]."""
+    from PIL import Image, ImageDraw, ImageFilter
+    for blur, count, sizes in groups:
+        layer = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+        d = ImageDraw.Draw(layer)
+        for _ in range(count):
+            draw_one(d, rng.uniform(0, w), rng.uniform(0, h), rng.uniform(*sizes))
+        base = Image.alpha_composite(base, layer.filter(ImageFilter.GaussianBlur(blur)) if blur else layer)
+    return base
+
+
+def _heart(cx, cy, size, turn=0.0):
+    """A heart's outline (the classic curve), `size` pixels across."""
+    points = []
+    for k in range(40):
+        t = 2 * math.pi * k / 40
+        x = 16 * math.sin(t) ** 3
+        y = -(13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t))
+        x, y = x * size / 34, y * size / 34
+        points.append((cx + x * math.cos(turn) - y * math.sin(turn), cy + x * math.sin(turn) + y * math.cos(turn)))
+    return points
+
+
+def _rgba(canvas):
+    import numpy as np
+    from PIL import Image
+    return Image.fromarray(np.clip(canvas, 0, 255).astype("uint8"), "RGB").convert("RGBA")
+
+
+def _party(w, h, rng):
+    import numpy as np
+    canvas = _grad(h, w, [(0.0, (64, 36, 104)), (0.55, (150, 62, 128)), (1.0, (242, 142, 108))])
+    _glow(canvas, w * 0.5, h * 0.3, w * 0.5, (255, 214, 180), 0.25)
+    base = _rgba(canvas)
+    colours = [(255, 92, 120), (255, 196, 64), (88, 200, 255), (140, 232, 140), (190, 130, 255), (255, 150, 60)]
+
+    def balloon(d, x, y, r):
+        c = colours[int(rng.integers(0, len(colours)))]
+        d.line([(x, y + r * 1.25), (x + r * 0.25, y + r * 2.4), (x - r * 0.1, y + r * 3.4)], fill=(250, 240, 250, 150),
+               width=max(2, int(r * 0.05)))
+        d.ellipse((x - r * 0.85, y - r, x + r * 0.85, y + r * 1.2), fill=c + (235,))
+        d.polygon([(x - r * 0.12, y + r * 1.32), (x + r * 0.12, y + r * 1.32), (x, y + r * 1.15)], fill=c + (235,))
+        d.ellipse((x - r * 0.5, y - r * 0.65, x - r * 0.15, y - r * 0.15), fill=(255, 255, 255, 90))
+
+    def confetti(d, x, y, r):
+        c = colours[int(rng.integers(0, len(colours)))]
+        a = rng.uniform(0, math.pi)
+        dx, dy = math.cos(a) * r, math.sin(a) * r
+        ex, ey = -math.sin(a) * r * 0.4, math.cos(a) * r * 0.4
+        d.polygon([(x - dx - ex, y - dy - ey), (x + dx - ex, y + dy - ey), (x + dx + ex, y + dy + ey),
+                   (x - dx + ex, y - dy + ey)], fill=c + (int(rng.uniform(170, 240)),))
+
+    base = _layers(base, w, h, rng, [(10, 6, (70, 110))], balloon)
+    base = _layers(base, w, h, rng, [(5, 60, (8, 14)), (0, 140, (5, 10))], confetti)
+    base = _layers(base, w, h, rng, [(2, 5, (90, 130))], balloon)
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.2)
+
+
+def _fireworks(w, h, rng):
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    canvas = _grad(h, w, [(0.0, (6, 8, 26)), (0.75, (22, 24, 64)), (1.0, (46, 36, 76))])
+    for _ in range(400):
+        x, y = int(rng.integers(0, w)), int(rng.integers(0, int(h * 0.8)))
+        canvas[y, x] = np.maximum(canvas[y, x], rng.uniform(70, 170))
+    base = _rgba(canvas)
+    colours = [(255, 120, 150), (255, 214, 90), (110, 210, 255), (170, 255, 160), (210, 150, 255), (255, 170, 90)]
+    for cx, cy, r in ((0.3, 0.22, 0.24), (0.74, 0.16, 0.2), (0.62, 0.42, 0.17), (0.2, 0.5, 0.13), (0.85, 0.58, 0.11)):
+        cx, cy, r = cx * w, cy * h, r * w
+        colour = colours[int(rng.integers(0, len(colours)))]
+        glow = Image.new("RGBA", (w, h), colour + (0,))
+        ImageDraw.Draw(glow).ellipse((cx - r * 0.9, cy - r * 0.9, cx + r * 0.9, cy + r * 0.9), fill=colour + (46,))
+        base = Image.alpha_composite(base, glow.filter(ImageFilter.GaussianBlur(r * 0.35)))
+        sparks = Image.new("RGBA", (w, h), colour + (0,))
+        d = ImageDraw.Draw(sparks)
+        rays = int(rng.integers(36, 56))
+        for k in range(rays):
+            a = 2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / rays
+            reach = r * rng.uniform(0.75, 1.0)
+            for step in range(9):                      # each spark a trail of dots, fading towards the centre
+                f = 0.3 + 0.7 * step / 8
+                x, y = cx + math.cos(a) * reach * f, cy + math.sin(a) * reach * f + (f ** 2) * r * 0.12
+                size = 2.0 + 3.5 * f
+                d.ellipse((x - size, y - size, x + size, y + size), fill=colour + (int(70 + 185 * f),))
+        base = Image.alpha_composite(base, sparks.filter(ImageFilter.GaussianBlur(1.2)))
+    d = ImageDraw.Draw(base)                            # a far-off town along the bottom, its windows lit
+    x = 0
+    while x < w:
+        bw, bh = int(rng.integers(40, 110)), int(rng.integers(int(h * 0.04), int(h * 0.12)))
+        d.rectangle((x, h - bh, x + bw, h), fill=(12, 12, 28, 255))
+        for _ in range(int(bw * bh / 900)):
+            if rng.random() < 0.35:
+                lx, ly = x + int(rng.integers(4, max(5, bw - 8))), h - int(rng.integers(8, max(9, bh - 6)))
+                d.rectangle((lx, ly, lx + 5, ly + 7), fill=(255, 210, 140, 200))
+        x += bw
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.0)
+
+
+def _hearts(w, h, rng):
+    import numpy as np
+    canvas = _grad(h, w, [(0.0, (255, 226, 234)), (0.6, (248, 176, 198)), (1.0, (222, 110, 150))])
+    _glow(canvas, w * 0.25, h * 0.15, w * 0.45, (255, 248, 250), 0.45)
+    base = _rgba(canvas)
+    tones = [(236, 64, 112), (255, 120, 150), (255, 182, 200), (214, 40, 90)]
+
+    def heart(d, x, y, r):
+        d.polygon(_heart(x, y, r, rng.uniform(-0.35, 0.35)),
+                  fill=tones[int(rng.integers(0, len(tones)))] + (int(rng.uniform(150, 235)),))
+
+    base = _layers(base, w, h, rng, [(9, 16, (60, 110)), (3, 30, (28, 50)), (0, 26, (14, 26))], heart)
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.2)
+
+
+def _spooky(w, h, rng):
+    import numpy as np
+    from PIL import ImageDraw, ImageFilter
+    canvas = _grad(h, w, [(0.0, (30, 16, 52)), (0.55, (86, 36, 86)), (0.85, (196, 96, 60)), (1.0, (226, 128, 56))])
+    _glow(canvas, w * 0.66, h * 0.24, w * 0.34, (255, 224, 170), 0.35)
+    base = _rgba(canvas)
+    d = ImageDraw.Draw(base)
+    mx, my, mr = w * 0.66, h * 0.24, w * 0.17                      # a big, friendly moon
+    d.ellipse((mx - mr, my - mr, mx + mr, my + mr), fill=(255, 232, 186, 255))
+    for dx, dy, r in ((-0.3, -0.2, 0.16), (0.25, 0.3, 0.12), (0.1, -0.45, 0.08)):
+        d.ellipse((mx + dx * mr - r * mr, my + dy * mr - r * mr, mx + dx * mr + r * mr, my + dy * mr + r * mr),
+                  fill=(240, 214, 168, 255))
+    for _ in range(7):                                             # bats: a body and two scalloped wings
+        bx, by, s = rng.uniform(0.1, 0.9) * w, rng.uniform(0.08, 0.48) * h, rng.uniform(16, 34)
+        wing = [(bx, by), (bx - s * 1.0, by - s * 0.55), (bx - s * 1.6, by - s * 0.1), (bx - s * 1.15, by + s * 0.05),
+                (bx - s * 0.75, by + s * 0.25), (bx - s * 0.35, by + s * 0.1)]
+        d.polygon(wing, fill=(22, 12, 30, 255))
+        d.polygon([(2 * bx - x, y) for x, y in wing], fill=(22, 12, 30, 255))
+        d.ellipse((bx - s * 0.22, by - s * 0.3, bx + s * 0.22, by + s * 0.3), fill=(22, 12, 30, 255))
+    ground = h * 0.86                                              # a hill, and smiling pumpkins on it
+    d.ellipse((-w * 0.3, ground - h * 0.04, w * 1.3, ground + h * 0.4), fill=(34, 20, 36, 255))
+    for px, size in ((0.22, 0.12), (0.42, 0.08), (0.78, 0.1)):
+        x, y, r = px * w, ground + h * 0.03, size * w
+        for k, f in enumerate((-0.55, 0.55, -0.25, 0.25, 0.0)):
+            shade = (232, 112, 30) if k < 4 else (250, 140, 40)
+            d.ellipse((x + f * r - r * 0.55, y - r * 0.62, x + f * r + r * 0.55, y + r * 0.62), fill=shade + (255,))
+        d.rounded_rectangle((x - r * 0.08, y - r * 0.85, x + r * 0.08, y - r * 0.5), radius=r * 0.04, fill=(70, 110, 50, 255))
+        lit = (255, 220, 120, 255)
+        d.polygon([(x - r * 0.38, y - r * 0.1), (x - r * 0.18, y - r * 0.1), (x - r * 0.28, y - r * 0.3)], fill=lit)
+        d.polygon([(x + r * 0.38, y - r * 0.1), (x + r * 0.18, y - r * 0.1), (x + r * 0.28, y - r * 0.3)], fill=lit)
+        d.chord((x - r * 0.4, y - r * 0.2, x + r * 0.4, y + r * 0.38), 10, 170, fill=lit)
+    base = base.filter(ImageFilter.GaussianBlur(2))
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.2)
+
+
+def _snowy(w, h, rng):
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    canvas = _grad(h, w, [(0.0, (12, 22, 52)), (0.7, (34, 56, 100)), (1.0, (70, 96, 140))])
+    base = _rgba(canvas)
+    d = ImageDraw.Draw(base)
+    d.ellipse((-w * 0.4, h * 0.84, w * 0.9, h * 1.3), fill=(214, 226, 242, 255))            # snow on the ground
+    d.ellipse((w * 0.3, h * 0.87, w * 1.5, h * 1.3), fill=(232, 240, 250, 255))
+    colours = [(255, 96, 96), (255, 210, 90), (110, 220, 140), (110, 180, 255), (255, 150, 220)]
+    for row, (y0, sag) in enumerate(((0.06, 0.07), (0.17, 0.05))):                         # strings of lights
+        points = [(w * t / 20, h * y0 + math.sin(math.pi * t / 20) * h * sag) for t in range(21)]
+        d.line(points, fill=(30, 36, 50, 255), width=3)
+        lights = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+        g = ImageDraw.Draw(lights)
+        for k, (x, y) in enumerate(points[1:-1]):
+            c = colours[(k + row * 2) % len(colours)]
+            g.ellipse((x - 26, y - 14, x + 26, y + 38), fill=c + (90,))
+            g.ellipse((x - 9, y + 2, x + 9, y + 24), fill=c + (255,))
+        base = Image.alpha_composite(base, lights.filter(ImageFilter.GaussianBlur(6)))
+        base = Image.alpha_composite(base, lights.filter(ImageFilter.GaussianBlur(1)))
+
+    def flake(d, x, y, r):
+        d.ellipse((x - r, y - r, x + r, y + r), fill=(250, 252, 255, int(rng.uniform(150, 240))))
+
+    base = _layers(base, w, h, rng, [(6, 40, (10, 18)), (2, 120, (4, 8)), (0, 160, (2, 4))], flake)
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.0)
+
+
+def _spring(w, h, rng):
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    canvas = _grad(h, w, [(0.0, (196, 228, 248)), (0.62, (236, 244, 220)), (0.8, (186, 222, 150)), (1.0, (128, 186, 102))])
+    _glow(canvas, w * 0.75, h * 0.12, w * 0.32, (255, 250, 220), 0.5)
+    base = _rgba(canvas)
+    pastel = [(255, 190, 210), (200, 180, 255), (255, 230, 150), (170, 220, 255), (190, 240, 190)]
+    sky = Image.new("RGBA", (w, h), (255, 255, 255, 0))           # soft spots of colour, out of focus
+    g = ImageDraw.Draw(sky)
+    for _ in range(18):
+        x, y, r = rng.uniform(0, w), rng.uniform(0, h * 0.62), rng.uniform(30, 70)
+        g.ellipse((x - r, y - r, x + r, y + r), fill=pastel[int(rng.integers(0, len(pastel)))] + (90,))
+    base = Image.alpha_composite(base, sky.filter(ImageFilter.GaussianBlur(12)))
+    d = ImageDraw.Draw(base)
+    for _ in range(140):                                            # grass
+        x, y = rng.uniform(0, w), h * rng.uniform(0.8, 1.02)
+        d.line([(x, y), (x + rng.uniform(-14, 14), y - rng.uniform(30, 80))], fill=(92, 156, 76, 255), width=4)
+    for _ in range(9):                                              # painted eggs among the grass
+        x, y, r = rng.uniform(0.05, 0.95) * w, h * rng.uniform(0.86, 0.97), rng.uniform(34, 52)
+        c = pastel[int(rng.integers(0, len(pastel)))]
+        d.ellipse((x - r * 0.72, y - r, x + r * 0.72, y + r * 0.8), fill=c + (255,))
+        stripe = tuple(max(0, v - 50) for v in c)
+        d.line([(x - r * 0.66, y - r * 0.15), (x + r * 0.66, y - r * 0.15)], fill=stripe + (255,), width=int(r * 0.16))
+        for k in range(3):
+            dx = (k - 1) * r * 0.36
+            d.ellipse((x + dx - r * 0.07, y + r * 0.2, x + dx + r * 0.07, y + r * 0.34), fill=(255, 255, 255, 230))
+    for _ in range(16):                                             # flowers: five petals and a centre
+        x, y, r = rng.uniform(0, w), h * rng.uniform(0.82, 1.0), rng.uniform(12, 22)
+        c = pastel[int(rng.integers(0, len(pastel)))]
+        for k in range(5):
+            a = 2 * math.pi * k / 5
+            px, py = x + math.cos(a) * r, y + math.sin(a) * r
+            d.ellipse((px - r * 0.7, py - r * 0.7, px + r * 0.7, py + r * 0.7), fill=c + (255,))
+        d.ellipse((x - r * 0.5, y - r * 0.5, x + r * 0.5, y + r * 0.5), fill=(255, 214, 90, 255))
+    base = base.filter(ImageFilter.GaussianBlur(1.5))
+    return _finish(np.asarray(base.convert("RGB"), float), rng, 1.0)
+
+
 DRAW = {"studio": _studio, "dawn": _dawn, "day": _day, "sunset": _sunset, "night": _night, "room": _room,
-        "blossom": _blossom, "paper": _paper}
+        "blossom": _blossom, "paper": _paper, "party": _party, "fireworks": _fireworks, "hearts": _hearts,
+        "spooky": _spooky, "snowy": _snowy, "spring": _spring}
 
 
 def draw_builtin(name, size=SIZE):
-    """One built-in picture, the same every time it is drawn."""
+    """One built-in (or festive) picture, the same every time it is drawn."""
     import numpy as np
-    rng = np.random.default_rng(sorted(BUILTIN).index(name) + 101)
-    return DRAW[name](size[0], size[1], rng)
+    return DRAW[name](size[0], size[1], np.random.default_rng(SEEDS[name]))
 
 
 # ---------------------------------------------------------------- the owner's pictures, and choices
@@ -285,25 +517,33 @@ class Backgrounds:
         """Every choice, for the settings page: the special ones, the built-in ones, then the owner's."""
         out = [{"id": k, "title": t, "kind": "special"} for k, t in SPECIAL.items()]
         out += [{"id": k, "title": t, "kind": "builtin"} for k, t in BUILTIN.items()]
+        out += [{"id": k, "title": t, "kind": "festive"} for k, t in FESTIVE.items()]
         out += [{"id": k, "title": e.get("title") or "My picture", "kind": "yours", "added": e.get("added")}
                 for k, e in sorted(self.index().items(), key=lambda kv: kv[1].get("added", 0))]
         return out
 
     def known(self, choice):
-        return choice in SPECIAL or choice in BUILTIN or choice in self.index()
+        return choice in SPECIAL or choice in BUILTIN or choice in FESTIVE or choice in self.index()
 
-    def resolve(self, choice, hour=None):
-        """The picture a choice shows now: "auto" by the hour, "none" (or an unknown one) nothing."""
+    def resolve(self, choice, hour=None, now=None, every=10):
+        """The picture a choice shows now: "auto" by the hour; "photos" the owner's pictures in turn, a new one
+        every `every` minutes (by the time of day "auto" until they add one); "none" (or an unknown one) nothing."""
+        if choice == "photos":
+            mine = [k for k, _ in sorted(self.index().items(), key=lambda kv: (kv[1].get("added", 0), kv[0]))]
+            if mine:
+                step = int((time.time() if now is None else now) // (max(1.0, float(every or 10)) * 60))
+                return mine[step % len(mine)]
+            choice = "auto"
         if choice == "auto":
-            hour = time.localtime().tm_hour if hour is None else hour
+            hour = time.localtime(now).tm_hour if hour is None else hour
             return AUTO[part_of_day(hour)]
-        if choice in BUILTIN or choice in self.index():
+        if choice in BUILTIN or choice in FESTIVE or choice in self.index():
             return choice
         return None
 
     def path(self, picture):
         """The file of a picture (drawing a built-in one the first time)."""
-        if picture in BUILTIN:
+        if picture in BUILTIN or picture in FESTIVE:
             path = os.path.join(self.builtin_folder, picture + ".jpg")
             if not os.path.isfile(path):
                 os.makedirs(self.builtin_folder, exist_ok=True)
@@ -392,10 +632,12 @@ class Backgrounds:
         dim = own.get("dim") if isinstance(own.get("dim"), (int, float)) else default.get("dim", 0.0)
         return choice, float(dim or 0.0), bool(default.get("parallax", True))
 
-    def stage_spec(self, settings, character, hour=None):
-        """What the stage draws behind a character: {"path", "dim", "parallax"}, or None for nothing."""
+    def stage_spec(self, settings, character, hour=None, festive=None, now=None):
+        """What the stage draws behind a character: {"path", "dim", "parallax"}, or None for nothing. `festive`: a
+        special day's picture, shown instead (unless the choice is no picture at all)."""
         choice, dim, parallax = self.choice_for(settings, character)
-        picture = self.resolve(choice, hour)
+        every = (settings.get("background") or {}).get("every", 10)
+        picture = festive if festive in FESTIVE and choice != "none" else self.resolve(choice, hour, now, every)
         if picture is None:
             return None
         try:

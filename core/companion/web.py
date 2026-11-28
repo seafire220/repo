@@ -9,6 +9,7 @@ Rules:
 """
 import asyncio
 import base64
+import datetime
 import io
 import ipaddress
 import json
@@ -21,7 +22,8 @@ import urllib.parse
 from aiohttp import web
 
 from . import animations, backgrounds, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
-from . import body_motion, live_motion, mocap_assets, phone_apps, phone_record, tls
+from . import body_motion, live_motion, mocap_assets, phone_apps, phone_record, special_days, tls
+from . import weather as weather_module
 from . import memory as memory_module
 from .memory import when
 from . import backup as backup_module
@@ -467,7 +469,8 @@ class Console:
 
     async def background_thumbnail(self, request):
         picture = request.match_info["picture"]
-        if picture not in backgrounds.BUILTIN and picture not in self.device.backgrounds.index():
+        if picture not in backgrounds.BUILTIN and picture not in backgrounds.FESTIVE and \
+                picture not in self.device.backgrounds.index():
             raise web.HTTPNotFound(text="no such background")
         data = await asyncio.get_running_loop().run_in_executor(None, self.device.backgrounds.thumbnail, picture)
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "no-cache"})
@@ -495,7 +498,7 @@ class Console:
         body = await request.json()
         if not isinstance(body, dict):
             raise web.HTTPBadRequest(text="send choice, dim and parallax")
-        changes = {k: body[k] for k in ("choice", "dim", "parallax") if k in body}
+        changes = {k: body[k] for k in ("choice", "dim", "parallax", "every") if k in body}
         if "choice" in changes and not self.device.backgrounds.known(changes["choice"]):
             raise web.HTTPBadRequest(text="there is no background called %s" % changes["choice"])
         try:
@@ -526,6 +529,73 @@ class Console:
         if cid == self.device.active_id():
             self.device.show_background()
         return web.json_response({"choice": choice, "dim": dim})
+
+    # ----- your day: the weather, special days, wake-ups and timers (docs/28-user-guide.md, "Your day")
+    def _day_status(self):
+        device = self.device
+        settings = device.store.settings()
+        zone = device.timezone()
+        cid = device.active_id()
+        specials = device.specials(cid=cid) if cid else special_days.on(datetime.date.today(), settings)
+        weather = device.weather.now(settings, zone)
+        arrived = device.arrival(cid) if cid else None
+        return {
+            "timezone": zone,
+            "place": device.weather.place(settings, zone),
+            "units": device.weather.units(settings, zone),
+            "weather": weather,
+            "weather_said": weather_module.describe(weather),
+            "credit": weather_module.CREDIT,
+            "specials": [{"kind": x["kind"], "what": x["what"]} for x in specials],
+            "festive": special_days.festive(specials, settings),
+            "arrived": arrived.isoformat() if arrived else None,
+            "next_wake_up": device.next_wake_up(),
+            "timers": [{"label": k, "due": round(v[0]), "kind": v[2]} for k, v in sorted(device.timers.items(),
+                                                                                         key=lambda kv: kv[1][0])],
+            "ringing": sorted(device.rings),
+            "twelve_hour": weather_module.guess_12_hour(zone),
+        }
+
+    async def get_day(self, request):
+        return web.json_response(self._day_status())
+
+    async def find_places(self, request):
+        """Towns whose name starts with what was typed, from the list kept on the device: nothing is sent anywhere."""
+        found = await asyncio.get_running_loop().run_in_executor(
+            None, self.device.weather.places.search, request.query.get("q", "")[:80], self.device.timezone())
+        return web.json_response({"places": found})
+
+    async def check_weather(self, request):
+        """Fetch the forecast now (if it is due), and show what the character would say."""
+        settings = self.device.store.settings()
+        if not self.device.weather.on(settings):
+            raise web.HTTPConflict(text="turn the weather on first")
+        if self.device.weather.place(settings, self.device.timezone()) is None:
+            raise web.HTTPConflict(text="choose your town first")
+        await self.device.weather_now(wait=15.0)
+        self.device.clock_step()
+        status = self._day_status()
+        if status["weather"] is None:
+            status["problem"] = "MET Norway could not be reached. Is the device on the internet? It tries again in ten minutes."
+        return web.json_response(status)
+
+    async def stop_alarm(self, request):
+        """Stop an alarm that is ringing (as the device's button does)."""
+        stopped = self.device.stop_ringing()
+        return web.json_response(dict(self._day_status(), stopped=stopped))
+
+    async def try_wake_up(self, request):
+        """Ring a wake-up now, once, to hear how it sounds."""
+        if self.device.rings:
+            raise web.HTTPConflict(text="an alarm is ringing; stop it first")
+        self.device._ring("wake up", "wake", times=1)
+        return web.json_response(self._day_status())
+
+    async def cancel_timer(self, request):
+        """Cancel a timer or alarm set by voice."""
+        if not self.device.cancel_timer(request.match_info["label"]):
+            raise web.HTTPNotFound(text="there is no such timer or alarm")
+        return web.json_response(self._day_status())
 
     async def try_animation(self, request):
         """Play one of the character's added clips once on the screen."""
@@ -1084,6 +1154,7 @@ class Console:
         return web.json_response({"ok": True, "state": self.device.state, "listening": self.device.listening})
 
     async def interrupt(self, request):
+        self.device.stop_ringing()
         self.device.interrupt()
         return web.json_response({"ok": True})
 
@@ -1775,6 +1846,12 @@ def make_app(device):
     r.add_get("/api/characters/{cid}/background", console.get_character_background)
     r.add_put("/api/characters/{cid}/background", console.put_character_background)
     r.add_get("/api/backgrounds", console.get_backgrounds)
+    r.add_get("/api/day", console.get_day)
+    r.add_get("/api/places", console.find_places)
+    r.add_post("/api/weather/check", console.check_weather)
+    r.add_post("/api/alarms/stop", console.stop_alarm)
+    r.add_post("/api/alarms/try", console.try_wake_up)
+    r.add_delete("/api/timers/{label}", console.cancel_timer)
     r.add_post("/api/backgrounds", console.add_background)
     r.add_put("/api/backgrounds/default", console.put_background_default)
     r.add_get("/api/backgrounds/{picture}/thumb", console.background_thumbnail)

@@ -31,6 +31,18 @@ device gives them, unchanged, to the phone's browser, which runs them on the pho
 sherpa-onnx itself (the k2-fsa project), which runs these models, is under the Apache License 2.0: see the
 Python packages.
 
+DATA
+
+The weather (when the owner turns it on): forecasts from MET Norway, the Norwegian Meteorological Institute
+(api.met.no), under the Creative Commons Attribution 4.0 International licence (CC BY 4.0,
+https://creativecommons.org/licenses/by/4.0/) and the Norwegian Licence for Open Government Data (NLOD 2.0).
+The device sums them up in words, and shows the temperature and a picture of its own drawing.
+
+The towns to choose the weather's place from: GeoNames (geonames.org), every place of 15,000 people or more,
+CC BY 4.0. Only each town's name, region, country, position (to two decimals), population and time zone are
+kept. The time zone's main city, used until a town is chosen, comes from the time zone database (public
+domain) that the operating system carries.
+
 The MIT licence of the Piper voices:
 
 MIT License

@@ -9,6 +9,7 @@ live beside it and are never written back into a package.
     characters/<id>/animations/   full-body animations added for a 3D avatar (animations.py)
     memory/<id>/                  what the character remembers (memory.py)
 """
+import datetime
 import io
 import json
 import os
@@ -85,6 +86,9 @@ class Characters:
         except BaseException:
             shutil.rmtree(staging, ignore_errors=True)
             raise
+        if not self.device_settings(pkg.id).get("arrived"):
+            # The day it arrived, for its anniversaries (special_days.py); a restored backup brings the first one.
+            self.set_device_settings(pkg.id, {"arrived": datetime.date.today().isoformat()})
         return pkg.id
 
     def delete(self, cid):
