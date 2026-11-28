@@ -904,7 +904,7 @@ impl Live2dRenderer {
 	}
 
 	/// Draw the model's current frame over the background.
-	pub fn draw(&mut self, puppet: &Live2dPuppet) -> Result<(), String> {
+	pub fn draw(&mut self, puppet: &Live2dPuppet, background: Option<&crate::background::Background>) -> Result<(), String> {
 		let gl = &self.gl;
 		unsafe {
 			gl.bind_vertex_array(Some(self.vao));
@@ -949,6 +949,9 @@ impl Live2dRenderer {
 			let [r, g, b] = self.background;
 			gl.clear_color(r, g, b, 1.0);
 			gl.clear(glow::COLOR_BUFFER_BIT);
+			if let Some(picture) = background {
+				picture.draw(gl, self.width, self.height);
+			}
 		}
 		if puppet.needs_offscreen {
 			let top = self.take_target()?;

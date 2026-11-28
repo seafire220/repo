@@ -635,8 +635,96 @@ $("say-form").addEventListener("submit", async (e) => {
 });
 
 // ----- characters
+// ----- backgrounds: the picture behind the characters (backgrounds.py)
+let backgroundsInfo = null;
+
+async function loadBackgrounds() {
+  backgroundsInfo = await api("GET", "/api/backgrounds");
+  showBackgrounds();
+}
+
+function showBackgrounds() {
+  const info = backgroundsInfo;
+  if (!info) return;
+  const grid = $("bg-grid");
+  grid.replaceChildren();
+  for (const p of info.pictures) {
+    const item = document.createElement("div");
+    item.className = "bg-item" + (p.id === info.default.choice ? " on" : "");
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.title = p.title;
+    pick.dataset.picture = p.id;
+    if (p.kind === "special") {
+      const swatch = document.createElement("span");
+      swatch.className = "bg-swatch bg-" + p.id;
+      pick.append(swatch);
+    } else {
+      const img = document.createElement("img");
+      img.src = "/api/backgrounds/" + p.id + "/thumb";
+      img.alt = "";
+      img.loading = "lazy";
+      pick.append(img);
+    }
+    const label = document.createElement("span");
+    label.className = "bg-title";
+    text(label, p.id === "auto" ? "With the time of day" : p.id === "none" ? "None" : p.title);
+    pick.append(label);
+    pick.addEventListener("click", () => setBackgroundDefault({ choice: p.id }));
+    item.append(pick);
+    if (p.kind === "yours") {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "small secondary bg-remove";
+      text(remove, "Remove");
+      remove.addEventListener("click", () => removeBackground(p));
+      item.append(remove);
+    }
+    grid.append(item);
+  }
+  $("bg-dim").value = info.default.dim || 0;
+  $("bg-parallax").checked = info.default.parallax !== false;
+  const select = $("char-bg");
+  const keep = select.value;
+  select.replaceChildren(new Option("The same as the others", "default"));
+  for (const p of info.pictures) select.add(new Option(p.id === "auto" ? "Changes with the time of day" : p.title, p.id));
+  select.value = keep || "default";
+}
+
+async function setBackgroundDefault(changes) {
+  try {
+    backgroundsInfo = await api("PUT", "/api/backgrounds/default", changes);
+    showBackgrounds();
+    text($("bg-msg"), "");
+  } catch (e) { text($("bg-msg"), e.message); }
+}
+
+async function addBackground(file) {
+  text($("bg-msg"), "Adding the picture…");
+  try {
+    const title = file.name.replace(/\.[^.]*$/, "");
+    backgroundsInfo = await api("POST", "/api/backgrounds?title=" + encodeURIComponent(title), undefined, file);
+    await setBackgroundDefault({ choice: backgroundsInfo.added });
+  } catch (e) { text($("bg-msg"), e.message); }
+}
+
+async function removeBackground(p) {
+  if (!confirm("Remove “" + p.title + "”? Characters that used it go back to the default.")) return;
+  try {
+    backgroundsInfo = await api("DELETE", "/api/backgrounds/" + p.id);
+    showBackgrounds();
+    text($("bg-msg"), "");
+  } catch (e) { text($("bg-msg"), e.message); }
+}
+
+async function loadCharacterBackground(cid) {
+  const own = await api("GET", "/api/characters/" + cid + "/background");
+  $("char-bg").value = own.choice || "default";
+}
+
 async function refreshCharacters() {
   const data = await api("GET", "/api/characters");
+  loadBackgrounds().catch((e) => text($("bg-msg"), e.message));
   state.active = data.active;
   state.characters = data.characters;
   const list = $("char-list");
@@ -672,6 +760,19 @@ async function refreshCharacters() {
   if (active && active.preview) $("home-preview").src = "/api/characters/" + active.id + "/preview?" + Date.now();
 }
 
+$("bg-dim").addEventListener("change", () => setBackgroundDefault({ dim: Number($("bg-dim").value) }));
+$("bg-parallax").addEventListener("change", () => setBackgroundDefault({ parallax: $("bg-parallax").checked }));
+$("bg-file").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) addBackground(file);
+});
+$("char-bg").addEventListener("change", async () => {
+  try {
+    await api("PUT", "/api/characters/" + state.editing + "/background", { choice: $("char-bg").value });
+    text($("char-bg-msg"), "");
+  } catch (e) { text($("char-bg-msg"), e.message); }
+});
 $("char-file").addEventListener("change", async () => {
   const file = $("char-file").files[0];
   if (!file) return;
@@ -708,6 +809,7 @@ async function editCharacter(c) {
   loadFeelings(c.id);
   loadMovement(c.id);
   loadVrm(c).catch((e) => text($("vrm-msg"), e.message));
+  loadCharacterBackground(c.id).catch((e) => text($("char-bg-msg"), e.message));
   $("char-edit").scrollIntoView();
 }
 

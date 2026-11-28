@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import time
 
-from . import animations, family, package, providers
+from . import animations, backgrounds, family, package, providers
 from .audio import Detector, Microphone, Speaker, tone
 from .backlight import Backlight
 from .characters import Characters, split_persona
@@ -83,6 +83,8 @@ class Device:
         # A 3D avatar's animation style, clip folders, drawing cost and shot, also read by the stage at start.
         self.stage_settings = os.path.join(data_dir, "current-stage.json")
         self.animations = animations.Animations(self.characters)
+        self.backgrounds = backgrounds.Backgrounds(data_dir)
+        self.background_sent = None      # the picture the stage was last told to show
         # Gestures and idle actions changed or added on the settings page, for every character.
         self.custom_motions = motions.CustomMotions(os.path.join(data_dir, "config", "custom-motions.json"))
         speech_text.set_custom_gestures(self.custom_motions.words())
@@ -201,10 +203,15 @@ class Device:
             self.stage.clock(now.tm_hour + now.tm_min / 60.0 + now.tm_sec / 3600.0)
 
     async def clock_watch(self, every=600.0):
-        """Keep the stage's time of day right (the clock may change, or be set, while it runs)."""
+        """Keep the stage's time of day right (the clock may change, or be set, while it runs), and the
+        background with it when it follows the time of day."""
         while True:
             await asyncio.sleep(every)
             self.tell_the_time()
+            try:
+                self.show_background()
+            except OSError:
+                log.exception("the background could not be changed")
 
     async def stage_watch(self, patience=25.0):
         """If the character cannot be shown (the stage keeps failing to start), show a card instead.
@@ -483,8 +490,33 @@ class Device:
 
     def write_stage_settings(self, cid=None):
         """The stage settings of the character on the screen (a 3D avatar's animation style and the
-        like; none for others)."""
-        write_atomic(self.stage_settings, json.dumps(self.animations.stage_settings(cid) if cid else {}, indent=1))
+        like, and the picture behind it); none for a card."""
+        settings = self.animations.stage_settings(cid) if cid else {}
+        if cid:
+            settings["background"] = self.background_spec(cid)
+            self.background_sent = settings["background"]
+        write_atomic(self.stage_settings, json.dumps(settings, indent=1))
+
+    def background_spec(self, cid, hour=None):
+        """What the stage draws behind this character now (backgrounds.py), or None."""
+        try:
+            own = self.characters.device_settings(cid)
+        except (OSError, ValueError):
+            own = {}
+        return self.backgrounds.stage_spec(self.store.settings(), own, hour)
+
+    def show_background(self, force=False):
+        """Tell the stage at once which picture goes behind the character on the screen (after a change of
+        choice, or as the time of day moves on), and keep the stage settings for its next start."""
+        cid = self.active_id()
+        if not cid or os.path.realpath(self.current_puppet) == os.path.realpath(self.card):
+            return False
+        spec = self.background_spec(cid)
+        if spec == self.background_sent and not force:
+            return False
+        self.write_stage_settings(cid)
+        self.stage.send({"background": spec})
+        return True
 
     def _point_stage_at(self, target):
         tmp = self.current_puppet + ".new"

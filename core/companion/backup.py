@@ -64,6 +64,12 @@ def make(device, path):
                         remembered += 1
             info["characters"].append({"id": cid, "name": device.characters.manifest(cid).get("name", cid),
                                        "memory_files": remembered, "animations": len(index)})
+        pictures = device.backgrounds.index()
+        for picture in pictures:
+            z.write(os.path.join(device.backgrounds.folder, picture + ".jpg"), "backgrounds/%s.jpg" % picture)
+        if pictures:
+            z.writestr("backgrounds/backgrounds.json", json.dumps(pictures, indent=1))
+        info["backgrounds"] = len(pictures)
         z.writestr("settings.json", json.dumps(device.store.settings(), indent=1))
         custom = device.custom_motions.all()
         if custom:
@@ -73,7 +79,10 @@ def make(device, path):
 
 
 def _allowed(name, characters):
-    if name in ("backup.json", "settings.json", "custom-motions.json"):
+    if name in ("backup.json", "settings.json", "custom-motions.json", "backgrounds/backgrounds.json"):
+        return True
+    m = re.fullmatch(r"backgrounds/([a-z0-9_]{1,48})\.jpg", name)
+    if m:
         return True
     m = re.fullmatch(r"characters/([^/]+)(\.char|/device\.json|/animations\.json|/animations/([^/]+)\.vrma)", name)
     if m:
@@ -137,6 +146,7 @@ def restore(device, path):
                         done["skipped"].append("gesture %s: %s" % (name, error))
             except (ValueError, AttributeError):
                 done["skipped"].append("the changed gestures could not be read")
+        _restore_backgrounds(device, archive, names, done)
     active = info.get("active")
     if active in device.characters.ids():
         device.store.update_settings({"active_character": active})
@@ -191,3 +201,39 @@ def _restore_memory(device, archive, names, source_id, cid):
         os.makedirs(os.path.dirname(target), exist_ok=True)
         write_atomic(target, archive.read(name))
     return len(files)
+
+
+def _restore_backgrounds(device, archive, names, done):
+    """The owner's background pictures, under the names they had (the characters' choices name them)."""
+    if "backgrounds/backgrounds.json" not in names:
+        return
+    import io
+    from PIL import Image
+    from .backgrounds import ID, MAX_PICTURES
+    from .store import write_atomic
+    try:
+        saved = json.loads(archive.read("backgrounds/backgrounds.json"))
+    except (ValueError, KeyError):
+        done["skipped"].append("the background pictures could not be read")
+        return
+    index = device.backgrounds.index()
+    os.makedirs(device.backgrounds.folder, exist_ok=True)
+    for picture, entry in (saved.items() if isinstance(saved, dict) else []):
+        name = "backgrounds/%s.jpg" % picture
+        if not ID.fullmatch(picture) or not isinstance(entry, dict) or name not in names:
+            continue
+        if picture not in index and len(index) >= MAX_PICTURES:
+            done["skipped"].append("background %s: there are already %d pictures" % (picture, MAX_PICTURES))
+            continue
+        data = archive.read(name)
+        try:
+            with Image.open(io.BytesIO(data)) as im:
+                if im.format != "JPEG":
+                    raise ValueError("not a JPEG")
+                im.verify()
+        except (OSError, ValueError) as error:
+            done["skipped"].append("background %s: %s" % (picture, error))
+            continue
+        write_atomic(os.path.join(device.backgrounds.folder, picture + ".jpg"), data)
+        index[picture] = {"title": str(entry.get("title") or "My picture")[:60], "added": int(entry.get("added") or 0)}
+    write_atomic(device.backgrounds.index_path, json.dumps(index, indent=1))

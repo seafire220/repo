@@ -580,7 +580,7 @@ impl VrmRenderer {
 		Ok(self.offscreen.as_ref().map(|o| (o.fbo, o.width, o.height)))
 	}
 
-	pub fn draw(&mut self, puppet: &mut VrmPuppet) -> Result<(), String> {
+	pub fn draw(&mut self, puppet: &mut VrmPuppet, background: Option<&crate::background::Background>) -> Result<(), String> {
 		let (view_proj, eye) = self.camera(puppet);
 		let target = unsafe { self.target()? };
 		let gl = &self.gl;
@@ -598,6 +598,10 @@ impl VrmRenderer {
 			gl.clear_color(r, g, b, 1.0);
 			gl.depth_mask(true);
 			gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+			// The background goes into the same framebuffer (a smaller one, when drawn small), first.
+			if let Some(picture) = background {
+				picture.draw(gl, vw, vh);
+			}
 			gl.enable(glow::DEPTH_TEST);
 			gl.depth_func(glow::LEQUAL);
 			gl.disable(glow::STENCIL_TEST);

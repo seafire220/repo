@@ -9,6 +9,7 @@ import copy
 import hashlib
 import hmac
 import json
+import re
 import os
 import secrets as pysecrets
 import tempfile
@@ -56,6 +57,10 @@ DEFAULT_SETTINGS = {
     # unless the owner turns it on. A face-tracking app is reached at the phone's address. `mirror`: the
     # character copies you as a reflection does; `flip`: an app's nods the other way up.
     "live": {"camera": False, "app": "vts", "app_address": "", "mirror": True, "flip": False},
+    # The picture behind every character (backgrounds.py), unless a character has its own: a built-in one,
+    # "auto" (changing with the time of day), "none" (the plain colour) or one the owner added. `dim` makes
+    # it darker so the character stands out; `parallax`: it moves a little as the character turns.
+    "background": {"choice": "auto", "dim": 0.0, "parallax": True},
 }
 
 # The secret names the device accepts: one key per provider.
@@ -208,8 +213,12 @@ def _check_choices(changes):
 
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
                         ("family_safe", "on"), ("wake_word", "on"), ("live", "camera"), ("live", "mirror"),
-                        ("live", "flip")):
+                        ("live", "flip"), ("background", "parallax")):
         switch(group, name)
+    number("background", "dim", 0, 0.8)
+    picked = (changes.get("background") or {}).get("choice")
+    if picked is not None and (not isinstance(picked, str) or not re.fullmatch(r"[a-z0-9_]{1,48}", picked)):
+        raise ValueError("background.choice must be the name of a background")
     choice("live", "app", ("vts", "ifm"))
     address = (changes.get("live") or {}).get("app_address")
     if address is not None and (not isinstance(address, str) or len(address) > 64):

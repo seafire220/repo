@@ -5,6 +5,7 @@
 //! and moves its mouth and changes its manner according to commands from the
 //! core service. It holds no API keys and makes no network connections.
 
+mod background;
 mod behaviour;
 mod capture;
 mod control;
@@ -66,6 +67,9 @@ Usage: stage CHARACTER [options]
                         the socket
   --no-stdin            do not read commands from standard input
   --background RRGGBB   background colour (default 101014)
+  --background-picture FILE
+                        a picture behind the character, filling the screen (PNG or JPEG;
+                        also the stage settings' \"background\", or the background command)
   --seed N              seed for blink timing (default 1)
   --still               no idle movement; only commanded mouth, blink and look
   --view X0,Y0,X1,Y1    show this box instead of the whole character (puppet units;
@@ -114,6 +118,7 @@ struct Options {
 	overlays: Option<PathBuf>,
 	stdin: bool,
 	background: [f32; 3],
+	background_picture: Option<background::Spec>,
 	seed: u64,
 	still: bool,
 	physics: bool,
@@ -147,6 +152,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		overlays: None,
 		stdin: true,
 		background: [0x10 as f32 / 255.0, 0x10 as f32 / 255.0, 0x14 as f32 / 255.0],
+		background_picture: None,
 		seed: 1,
 		still: false,
 		physics: true,
@@ -192,6 +198,9 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 			"--map" => o.map = Some(value("--map")?.into()),
 			"--socket" => o.socket = Some(value("--socket")?.into()),
 			"--overlays" => o.overlays = Some(value("--overlays")?.into()),
+			"--background-picture" => {
+				o.background_picture = Some(background::Spec { path: value("--background-picture")?.into(), dim: 0.0, parallax: 1.0 })
+			}
 			"--no-stdin" => o.stdin = false,
 			"--background" => {
 				let v = value("--background")?;
@@ -368,6 +377,14 @@ fn read_settings(o: &mut Options) -> Option<String> {
 			match x.as_f64().filter(|f| (0.0..=1.0).contains(f)) {
 				Some(f) => o.model_motions = Some(f as f32),
 				None => problems.push(format!("model_motions {x}")),
+			}
+		}
+	}
+	if o.background_picture.is_none() {
+		if let Some(x) = v.get("background") {
+			match background::Spec::from_json(x) {
+				Ok(spec) => o.background_picture = spec,
+				Err(e) => problems.push(format!("background ({e})")),
 			}
 		}
 	}
@@ -552,6 +569,8 @@ struct StageApp {
 	last_real: Instant,
 	/// Pictures over the character, and the screen's brightness (overlay.rs).
 	overlays: Option<overlay::Overlays>,
+	/// The picture behind the character (background.rs).
+	backdrop: Option<background::Background>,
 	/// A Live2D-format model's own idle motions: how much shows (the owner's choice), how much of that
 	/// shows now (less while listening, talking or dozing), and the part of the body each parameter
 	/// belongs to (a gesture holding that part takes it back from the motion).
@@ -728,6 +747,14 @@ impl StageApp {
 				}
 			}
 			Command::Live(values) => self.live.set(&values),
+			Command::Background(spec) => {
+				if let (Some(b), Some((_, aux))) = (&mut self.backdrop, &self.on_window) {
+					match b.set(aux, spec, (self.width, self.height)) {
+						Ok(()) => self.events.emit(json!({"event": "background", "shown": b.spec.is_some()})),
+						Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+					}
+				}
+			}
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -924,6 +951,18 @@ impl App for StageApp {
 					Ok(o) => Some(o),
 					Err(e) => {
 						self.warnings.push(format!("captions and signs cannot be shown: {e}"));
+						None
+					}
+				};
+				self.backdrop = match background::Background::new(&aux) {
+					Ok(mut b) => {
+						if let Err(e) = b.set(&aux, self.opts.background_picture.clone(), (self.opts.width, self.opts.height)) {
+							self.warnings.push(e);
+						}
+						Some(b)
+					}
+					Err(e) => {
+						self.warnings.push(format!("a background cannot be shown: {e}"));
 						None
 					}
 				};
@@ -1139,11 +1178,18 @@ impl App for StageApp {
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
 		};
+		if let Some(b) = &mut self.backdrop {
+			b.update(aux, dt, pose.head_yaw, pose.head_pitch);
+		}
+		let backdrop = self.backdrop.as_ref().filter(|b| b.shown());
 		let started = Instant::now();
 		let posed: Instant;
 		match (&mut self.puppet, renderer) {
 			(Puppet::Inox(model), Renderer::Inox(renderer)) => {
 				renderer.clear();
+				if let Some(b) = backdrop {
+					b.draw(aux, self.width, self.height);
+				}
 				let puppet = &mut model.puppet;
 				puppet.begin_frame();
 				if let Some(params) = puppet.param_ctx.as_mut() {
@@ -1160,7 +1206,7 @@ impl App for StageApp {
 			(Puppet::Live2d(puppet), Renderer::Live2d(renderer)) => {
 				puppet.update(&values, dt);
 				posed = Instant::now();
-				if let Err(e) = renderer.draw(puppet) {
+				if let Err(e) = renderer.draw(puppet, backdrop) {
 					self.events.emit(json!({"event": "fatal", "message": format!("drawing failed: {e}")}));
 					return false;
 				}
@@ -1168,7 +1214,7 @@ impl App for StageApp {
 			(Puppet::Vrm(puppet), Renderer::Vrm(renderer)) => {
 				puppet.update(&values, dt);
 				posed = Instant::now();
-				if let Err(e) = renderer.draw(puppet) {
+				if let Err(e) = renderer.draw(puppet, backdrop) {
 					self.events.emit(json!({"event": "fatal", "message": format!("drawing failed: {e}")}));
 					return false;
 				}
@@ -1384,6 +1430,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 		watchdog,
 		last_real: Instant::now(),
 		overlays: None,
+		backdrop: None,
 		own_strength,
 		own_share: smooth::Spring::new(own_strength, 0.6),
 		own_channels,

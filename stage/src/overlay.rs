@@ -196,7 +196,7 @@ void main() {
 "#;
 
 /// GL state the renderers may rely on, saved before drawing over them and put back after.
-struct Saved {
+pub(crate) struct Saved {
 	program: Option<glow::Program>,
 	vao: Option<glow::VertexArray>,
 	array_buffer: Option<glow::Buffer>,
@@ -213,7 +213,7 @@ struct Saved {
 }
 
 impl Saved {
-	unsafe fn take(gl: &glow::Context) -> Self {
+	pub(crate) unsafe fn take(gl: &glow::Context) -> Self {
 		let mut viewport = [0; 4];
 		gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
 		let active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE);
@@ -241,7 +241,7 @@ impl Saved {
 		}
 	}
 
-	unsafe fn restore(&self, gl: &glow::Context) {
+	pub(crate) unsafe fn restore(&self, gl: &glow::Context) {
 		let set = |cap: u32, on: bool| if on { gl.enable(cap) } else { gl.disable(cap) };
 		set(glow::BLEND, self.blend);
 		set(glow::DEPTH_TEST, self.depth);

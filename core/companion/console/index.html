@@ -60,6 +60,15 @@
   <section id="characters" class="tab" hidden>
     <h2>Characters</h2>
     <ul id="char-list" class="cards"></ul>
+    <h3>Background</h3>
+    <p class="muted">The picture behind the characters. A character can have its own instead (when you edit it,
+      below).</p>
+    <div id="bg-grid" class="bg-grid"></div>
+    <label>Darker, so the character stands out <input type="range" id="bg-dim" min="0" max="0.8" step="0.1"></label>
+    <label><input type="checkbox" id="bg-parallax"> It moves a little as the character turns</label>
+    <p>Add a picture of your own (a photo or any picture, JPEG or PNG; it is fitted to the screen, and where a photo
+      was taken is not kept) <input type="file" id="bg-file" accept="image/*"></p>
+    <p class="error" id="bg-msg"></p>
     <h3>Add a character</h3>
     <p>Choose one of these:</p>
     <ul class="plain">
@@ -78,6 +87,8 @@
     <p class="error" id="char-error"></p>
     <div id="char-edit" hidden>
       <h3>Edit <span id="edit-name"></span></h3>
+      <p><label>Background <select id="char-bg"><option value="default">The same as the others</option></select></label>
+        <span id="char-bg-msg" class="error"></span></p>
       <details id="persona-form" open>
         <summary>Describe the character (the persona is written from your answers)</summary>
         <label>Name <input id="pf-name" maxlength="60"></label>

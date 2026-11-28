@@ -1057,3 +1057,17 @@ rejected. Settled entries are not reopened without new evidence.
 - Rejected: solving on the phone (the device's numpy is quicker to test and the same for every phone);
   following sideways steps (a hand-held phone moves too); copying the whole body live (later, if wanted).
 
+## D-073 — Backgrounds behind the character
+
+- Date: 2026-11-28
+- Decision: the stage draws a picture behind every kind of character (`stage/src/background.rs`): filling the
+  screen with no bars, faded from one to the next, darker if asked, and moving a little the other way as
+  the character turns. Eight built-in pictures are drawn in code by the device itself (`core/companion/backgrounds.py`),
+  so no picture's licence needs checking; "with the time of day" is the default. Owners add their own photos,
+  turned upright, fitted to the screen and stripped of camera details (location among them). One choice for
+  all characters, and one per character; both are in backups.
+- Why: backgrounds were a "wanted" feature carried over from the reference product (`03-requirements-spec.md`),
+  and the owner asked for them; every comparable product shows its character in a scene.
+- Rejected: shipping photos or drawings from elsewhere (licences, and D-024); moving pictures (video
+  backgrounds), until frame rates on the Pi are measured.
+

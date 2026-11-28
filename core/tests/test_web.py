@@ -103,7 +103,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/api/characters?name=Aria", data=model_folder_zip(), headers=H)
         cid = (await r.json())["id"]
         with open(self.device.stage_settings) as f:
-            self.assertEqual(json.load(f), {"model_motions": 1.0}, "an imported model's motions play as made")
+            settings = json.load(f)
+        self.assertEqual(settings.pop("model_motions"), 1.0, "an imported model's motions play as made")
+        self.assertEqual(set(settings), {"background"})
         r = await self.client.get("/api/characters/%s/movement" % cid, headers=H)
         own = (await r.json())["own_motions"]
         self.assertEqual(own, {"setting": "full", "idle": ["idle"], "studio": False})
@@ -113,7 +115,7 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await r.json())["own_motions"]["setting"], "gentle")
         self.assertIn({"model_motions": 0.5}, self.stage.commands, "changed on the screen at once")
         with open(self.device.stage_settings) as f:
-            self.assertEqual(json.load(f), {"model_motions": 0.5}, "and kept for the next start")
+            self.assertEqual(json.load(f)["model_motions"], 0.5, "and kept for the next start")
         r = await self.client.put("/api/characters/%s/own-motions" % cid, json={"setting": "loud"}, headers=H)
         self.assertEqual(r.status, 400)
 
@@ -127,7 +129,9 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.device.activate("aria")
         self.assertEqual(self.device.characters.own_motion_setting("aria"), "off")
         with open(self.device.stage_settings) as f:
-            self.assertEqual(json.load(f), {"model_motions": 0.0})
+            settings = json.load(f)
+        self.assertEqual(settings.pop("model_motions"), 0.0)
+        self.assertEqual(set(settings), {"background"})
         r = await self.client.get("/api/characters/aria/movement", headers=H)
         self.assertTrue((await r.json())["own_motions"]["studio"])
 
@@ -194,13 +198,13 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 200)
         r = await self.client.delete("/api/characters/%s/animations/little_dance" % cid, headers=H)
         self.assertEqual(r.status, 404)
-        # A 2D character has none of this, and its stage settings are empty.
+        # A 2D character has none of this: its stage settings are only the picture behind it.
         self.device.characters.install(package.build(good_files(), manifest()))
         r = await self.client.get("/api/characters/aria/animations", headers=H)
         self.assertEqual(r.status, 400)
         self.device.activate("aria")
         with open(self.device.stage_settings) as f:
-            self.assertEqual(json.load(f), {})
+            self.assertEqual(set(json.load(f)), {"background"})
 
     async def test_turning_off_gestures_by_mood_tells_the_stage(self):
         await self.login()

@@ -20,7 +20,7 @@ import urllib.parse
 
 from aiohttp import web
 
-from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
+from . import animations, backgrounds, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
 from . import body_motion, live_motion, mocap_assets, phone_apps, phone_record, tls
 from . import memory as memory_module
 from .memory import when
@@ -455,6 +455,77 @@ class Console:
             raise web.HTTPNotFound(text="no such animation")
         self._restage(cid)
         return web.json_response({"ok": True})
+
+    # ----- backgrounds: a picture behind the character (backgrounds.py)
+    def _backgrounds_status(self):
+        cid = self.device.active_id()
+        return {"default": self.device.store.settings()["background"],
+                "pictures": self.device.backgrounds.pictures(), "active": cid}
+
+    async def get_backgrounds(self, request):
+        return web.json_response(self._backgrounds_status())
+
+    async def background_thumbnail(self, request):
+        picture = request.match_info["picture"]
+        if picture not in backgrounds.BUILTIN and picture not in self.device.backgrounds.index():
+            raise web.HTTPNotFound(text="no such background")
+        data = await asyncio.get_running_loop().run_in_executor(None, self.device.backgrounds.thumbnail, picture)
+        return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+    async def add_background(self, request):
+        """Keep a picture of the owner's to use as a background."""
+        data = await request.read()
+        try:
+            picture = await asyncio.get_running_loop().run_in_executor(
+                None, self.device.backgrounds.add, data, request.query.get("title", ""))
+        except backgrounds.BackgroundError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        return web.json_response(dict(self._backgrounds_status(), added=picture))
+
+    async def delete_background(self, request):
+        """Remove a picture of the owner's; characters that used it go back to the default."""
+        if not self.device.backgrounds.remove(request.match_info["picture"]):
+            raise web.HTTPNotFound(text="no such background of yours")
+        self.device.show_background()
+        return web.json_response(self._backgrounds_status())
+
+    async def put_background_default(self, request):
+        """The background behind every character without one of its own: which, how dim, and whether it
+        moves a little as the character turns."""
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send choice, dim and parallax")
+        changes = {k: body[k] for k in ("choice", "dim", "parallax") if k in body}
+        if "choice" in changes and not self.device.backgrounds.known(changes["choice"]):
+            raise web.HTTPBadRequest(text="there is no background called %s" % changes["choice"])
+        try:
+            self.device.store.update_settings({"background": changes})
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.show_background()
+        return web.json_response(self._backgrounds_status())
+
+    async def get_character_background(self, request):
+        cid = self._cid(request)
+        own = self.device.characters.device_settings(cid).get("background") or {}
+        return web.json_response({"choice": own.get("choice") or "default", "dim": own.get("dim")})
+
+    async def put_character_background(self, request):
+        """A character's own background ("default": the device's), and how dim, if not the device's."""
+        cid = self._cid(request)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send choice and dim")
+        choice = body.get("choice", "default")
+        if choice != "default" and not (isinstance(choice, str) and self.device.backgrounds.known(choice)):
+            raise web.HTTPBadRequest(text="there is no background called %s" % choice)
+        dim = body.get("dim")
+        if dim is not None and (isinstance(dim, bool) or not isinstance(dim, (int, float)) or not 0 <= dim <= 0.8):
+            raise web.HTTPBadRequest(text="dim is a number from 0 to 0.8")
+        self.device.characters.set_device_settings(cid, {"background": {"choice": choice, "dim": dim}})
+        if cid == self.device.active_id():
+            self.device.show_background()
+        return web.json_response({"choice": choice, "dim": dim})
 
     async def try_animation(self, request):
         """Play one of the character's added clips once on the screen."""
@@ -1701,6 +1772,13 @@ def make_app(device):
     r.add_post("/api/characters/{cid}/animations/{role}", console.add_animation)
     r.add_delete("/api/characters/{cid}/animations/{role}", console.delete_animation)
     r.add_post("/api/characters/{cid}/animations/{role}/try", console.try_animation)
+    r.add_get("/api/characters/{cid}/background", console.get_character_background)
+    r.add_put("/api/characters/{cid}/background", console.put_character_background)
+    r.add_get("/api/backgrounds", console.get_backgrounds)
+    r.add_post("/api/backgrounds", console.add_background)
+    r.add_put("/api/backgrounds/default", console.put_background_default)
+    r.add_get("/api/backgrounds/{picture}/thumb", console.background_thumbnail)
+    r.add_delete("/api/backgrounds/{picture}", console.delete_background)
     r.add_get("/api/motions", console.get_motions)
     r.add_post("/api/motions/try", console.try_motion)
     r.add_put("/api/motions/{name}", console.put_motion)

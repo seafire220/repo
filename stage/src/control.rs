@@ -126,6 +126,8 @@ pub enum Command {
 	ModelMotions(f32),
 	/// A person's movement, live: controls (indices into motion::KEYS) and values. Empty: it ends.
 	Live(Vec<(usize, f32)>),
+	/// A picture behind the character, or none: `{"background": {"path": ..., "dim": 0.2}}`.
+	Background(Option<crate::background::Spec>),
 	Quit,
 }
 
@@ -228,6 +230,7 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				}
 				out.push(Command::Live(values));
 			}
+			"background" => out.push(Command::Background(crate::background::Spec::from_json(val)?)),
 			"define" => {
 				if !val.is_object() {
 					return Err("\"define\" is a library entry with its \"name\"".into());

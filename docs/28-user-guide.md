@@ -257,6 +257,22 @@ character package includes its own `voice/sample.wav`, you can clone directly
 from it. The recording goes to the service you chose, and the cloned voice
 stays in your account there; delete it there if you no longer want it.
 
+### Backgrounds
+
+The character stands in front of a picture. Under **Characters → Background** on the settings page:
+
+- choose one of eight built-in pictures (a studio, a soft morning, a clear sky, a sunset, a starry night, a
+  cosy room, blossom, paper), **With the time of day** (the morning, the day, a sunset and a starry night as
+  the day goes on; the default), or **None** for a plain dark colour;
+- **add a picture of your own**: a photo or any picture (JPEG or PNG). It is fitted to the screen, filling
+  it without black bars, and the details a phone keeps with a photo (where it was taken, among them) are
+  not kept;
+- **Darker** makes the picture dimmer so the character stands out;
+- **It moves a little as the character turns** gives a hint of depth; turn it off for a still picture.
+
+Each character can have its own picture instead: edit the character and choose **Background**. Your own
+pictures are in backups; **Remove** takes one away, and characters that used it go back to the default.
+
 ## How it moves
 
 The character moves by itself; you can shape how. Under each character:

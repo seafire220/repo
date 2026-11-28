@@ -29,6 +29,16 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; p
 .cards { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .cards li { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; text-align: center; }
 .cards li.active { outline: 2px solid var(--accent); }
+.bg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.bg-item { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.bg-item > button:first-child { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; color: inherit; cursor: pointer; }
+.bg-item.on > button:first-child { outline: 2px solid var(--accent); }
+.bg-item img, .bg-swatch { width: 60px; height: 107px; border-radius: 6px; object-fit: cover; display: block; }
+.bg-swatch.bg-none { background: #101014; border: 1px solid var(--line); }
+.bg-swatch.bg-auto { background: linear-gradient(#bed6f2 0 25%, #4e8cd6 25% 50%, #ac4c7c 50% 75%, #0a0c26 75%); }
+.bg-title { font-size: 12px; line-height: 1.2; text-align: center; }
+.bg-remove { font-size: 12px; }
 .cards img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; }
 .cards button { margin: 4px 2px 0; padding: 4px 8px; font-size: 0.85rem; }
 .error { color: var(--bad); }
