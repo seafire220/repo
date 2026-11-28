@@ -55,6 +55,9 @@ check() {   # description, then a command that succeeds when the check passes
 }
 enabled() { [ -L "$ROOT/etc/systemd/system/$1.wants/$2" ]; }
 absent_or_disabled() { ! ls "$ROOT"/etc/systemd/system/*.wants/"$1" >/dev/null 2>&1; }
+# None of these paths exists (globs that match nothing stay as written, and do not exist). One "ls" of several
+# paths cannot tell this: it fails as soon as any one is missing.
+none_exist() { local p; for p in "$@"; do if [ -e "$p" ] || [ -L "$p" ]; then return 1; fi; done; return 0; }
 
 check "core service installed" test -f "$ROOT/opt/companion/core/companion/__main__.py"
 check "settings page installed" test -f "$ROOT/opt/companion/core/companion/console/index.html"
@@ -95,7 +98,7 @@ check "the button board's mute switch is the Pi's key (248), unless set otherwis
 check "an installer card's service is ready (it does nothing on other cards)" sh -c "test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-install' && test -L '$ROOT/etc/systemd/system/multi-user.target.wants/companion-tvbox-install.service' && grep -q '^ConditionPathExists=/etc/companion/installer' '$ROOT/etc/systemd/system/companion-tvbox-install.service'"
 if [ "$INSTALLER" = 1 ]; then
     check "an installer card for this box (number $MODEL_ID)" grep -qx "MODEL_ID=$MODEL_ID" "$ROOT/etc/companion/installer"
-    check "everything the community installer needs is inside (it fetches nothing)" sh -c "for t in tar hexdump mkfs.vfat mkfs.ext4 mkfs.btrfs parted losetup fdisk lsblk findmnt; do ls '$ROOT'/usr/bin/\$t '$ROOT'/usr/sbin/\$t >/dev/null 2>&1 || exit 1; done && test -x '$ROOT/usr/sbin/armbian-install'"
+    check "everything the community installer needs is inside (it fetches nothing)" sh -c "for t in tar hexdump mkfs.vfat mkfs.ext4 mkfs.btrfs parted losetup fdisk lsblk findmnt; do [ -e '$ROOT'/usr/bin/\$t ] || [ -e '$ROOT'/usr/sbin/\$t ] || exit 1; done && test -x '$ROOT/usr/sbin/armbian-install'"
 else
     check "not an installer card" sh -c "! test -e '$ROOT/etc/companion/installer'"
 fi
@@ -105,7 +108,7 @@ check "no first-login questions" sh -c "! test -e '$ROOT/root/.not_logged_in_yet
 if [ "$WITH_KEY" = 1 ]; then
     check "SSH for a maker's key only (no passwords)" sh -c "test -s '$ROOT/root/.ssh/authorized_keys' && grep -q '^PasswordAuthentication no' '$ROOT/etc/ssh/sshd_config.d/companion.conf'"
 else
-    check "SSH not enabled (neither the service nor its socket)" sh -c "! ls '$ROOT'/etc/systemd/system/*.wants/ssh.service '$ROOT'/etc/systemd/system/*.wants/ssh.socket >/dev/null 2>&1"
+    check "SSH not enabled (neither the service nor its socket)" none_exist "$ROOT"/etc/systemd/system/*.wants/ssh.service "$ROOT"/etc/systemd/system/*.wants/ssh.socket
     check "no SSH keys let in" sh -c "! test -s '$ROOT/root/.ssh/authorized_keys'"
 fi
 check "hostname is companion" grep -qx companion "$ROOT/etc/hostname"
@@ -113,7 +116,7 @@ check "Wi-Fi and time zone permission for the service" test -f "$ROOT/etc/polkit
 check "a setup screen is ready for the first start" sh -c "test -s '$DATA/card.inp' && test -L '$DATA/current.inp'"
 check "no API keys inside" sh -c "! test -e '$DATA/config/secrets.json'"
 check "no settings-page password inside" sh -c "! test -e '$DATA/config/console-password'"
-check "no characters or memories inside" sh -c "! ls '$DATA/characters/'* '$DATA/memory/'* >/dev/null 2>&1"
+check "no characters or memories inside" none_exist "$DATA"/characters/* "$DATA"/memory/*
 check "no saved Wi-Fi networks inside" sh -c "! ls '$ROOT'/etc/NetworkManager/system-connections/*.nmconnection >/dev/null 2>&1"
 check "no build leftovers" sh -c "! test -e '$ROOT/tmp/companion-src'"
 check "licences and notices on board" sh -c "test -s '$ROOT/opt/companion/share/licenses/stage.txt' && test -s '$ROOT/opt/companion/core/companion/notices/device.txt' && test -s '$ROOT/etc/companion-image'"

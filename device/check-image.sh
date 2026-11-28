@@ -80,6 +80,9 @@ check() {   # description, then a command that succeeds when the check passes
 enabled() { [ -L "$ROOT/etc/systemd/system/$1.wants/$2" ]; }
 masked() { [ "$(readlink "$ROOT/etc/systemd/system/$1")" = /dev/null ]; }
 absent_or_disabled() { ! ls "$ROOT"/etc/systemd/system/*.wants/"$1" >/dev/null 2>&1; }
+# None of these paths exists (globs that match nothing stay as written, and do not exist). One "ls" of several
+# paths cannot tell this: it fails as soon as any one is missing.
+none_exist() { local p; for p in "$@"; do if [ -e "$p" ] || [ -L "$p" ]; then return 1; fi; done; return 0; }
 
 check "core service installed" test -f "$ROOT/opt/companion/core/companion/__main__.py"
 check "settings page installed" test -f "$ROOT/opt/companion/core/companion/console/index.html"
@@ -117,8 +120,8 @@ check "a setup screen is ready for the first start" sh -c "test -s '$DATA/card.i
 check "the screen restarts forever if it fails" grep -q "StartLimitIntervalSec=0" "$ROOT/etc/systemd/system/companion-stage.service"
 check "no API keys inside" sh -c "! test -e '$DATA/config/secrets.json'"
 check "no settings-page password inside" sh -c "! test -e '$DATA/config/console-password'"
-check "no characters or memories inside" sh -c "! ls '$DATA/characters/'* '$DATA/memory/'* >/dev/null 2>&1"
-check "no saved Wi-Fi networks inside" sh -c "! ls '$ROOT'/etc/NetworkManager/system-connections/* '$WORK'/data/system/nm-connections/* >/dev/null 2>&1"
+check "no characters or memories inside" none_exist "$DATA"/characters/* "$DATA"/memory/*
+check "no saved Wi-Fi networks inside" none_exist "$ROOT"/etc/NetworkManager/system-connections/* "$WORK"/data/system/nm-connections/*
 check "no build leftovers" sh -c "! test -e '$ROOT/tmp/companion-src' && ! test -e '$ROOT/usr/local/share/ca-certificates/build-extra-ca.crt'"
 check "buttons and display in the boot settings" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q 'gpio-key,gpio=17'"
 check "the USB-C port can be a USB device (dwc2)" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q '^dtoverlay=dwc2,dr_mode=peripheral'"
