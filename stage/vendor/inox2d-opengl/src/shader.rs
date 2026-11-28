@@ -24,7 +24,12 @@ pub(crate) fn compile(gl: &glow::Context, vertex: &str, fragment: &str) -> Resul
 			);
 			(es_sources.0.as_str(), es_sources.1.as_str())
 		} else {
-			(vertex, fragment)
+			// Desktop OpenGL: the directive first, as on ES (a Mac's driver is strict about what comes before it).
+			es_sources = (
+				format!("#version 330 core\n{}", vertex.replace("#version 330", "")),
+				format!("#version 330 core\n{}", fragment.replace("#version 330", "")),
+			);
+			(es_sources.0.as_str(), es_sources.1.as_str())
 		};
 
 		let shader = gl.create_shader(glow::VERTEX_SHADER).map_err(ShaderCompileError)?;

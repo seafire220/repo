@@ -1155,7 +1155,7 @@ class Device:
         if cid and not os.path.exists(self.current_puppet):
             self._link_puppet(cid)
         if not cid:
-            write_atomic(self.card, screen.card_puppet(screen.setup_card()))
+            write_atomic(self.card, screen.card_puppet(screen.setup_card(getattr(self, "setup_link", None))))
             self._point_stage_at(self.card)
         self.restore_timers()
         if self.microphone is not None:
@@ -1166,7 +1166,8 @@ class Device:
             asyncio.ensure_future(self.stage_watch())
         asyncio.ensure_future(self.memory_watch())
         asyncio.ensure_future(self.clock_watch())
-        asyncio.ensure_future(self.update_watch())
+        if getattr(self, "updates", True):
+            asyncio.ensure_future(self.update_watch())
         asyncio.ensure_future(self.screen_watch())
         self.backlight.set(float(self.store.settings().get("screen", {}).get("brightness", 100)) / 100.0)
 

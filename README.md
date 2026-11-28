@@ -121,6 +121,7 @@ software is used.
 32. [Software updates for sold devices](docs/32-updates.md)
 33. [What else would make it complete and polished](docs/33-finishing.md)
 34. [Licences: what we use, what each licence asks, what is left for a lawyer](docs/34-licences.md)
+35. [Trying the device's software on a computer, with a phone](docs/35-try-on-a-computer.md)
 - [Decision log](docs/decision-log.md)
 
 ## Known gaps

@@ -1166,13 +1166,14 @@ class Console:
             suffix = "" if self.tls_port == 443 else ":%d" % self.tls_port
         names = []
         wifi = getattr(self.device, "wifi", None)
+        address = getattr(self.device, "lan_address", "")      # a computer standing in for the device
         if wifi is not None:
             try:
                 address = await wifi.address()
             except Exception:  # noqa: BLE001 (no address is no link, not a failure)
                 address = ""
-            if address:
-                names.append(address)
+        if address:
+            names.append(address)
         if name and name not in names:
             names.append(name)
         if wifi is not None and "companion.local" not in names:
@@ -1367,7 +1368,7 @@ class Console:
         port = getattr(self.device, "tls_port", None)
         if port is None:
             raise OSError("this device does not offer the live camera")
-        addresses = []
+        addresses = [getattr(self.device, "lan_address", "")]
         wifi = getattr(self.device, "wifi", None)
         if wifi is not None:
             try:

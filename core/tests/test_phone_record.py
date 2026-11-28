@@ -295,6 +295,14 @@ class RecordWebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 200)
         return await r.json()
 
+    async def test_a_computer_standing_in_gives_its_home_network_address_first(self):
+        self.device.wifi = None                       # try-on-a-computer.sh: no Wi-Fi of its own to ask
+        self.device.lan_address = "192.168.1.20"
+        await self.login()
+        started = await self.start()
+        self.assertTrue(started["links"][0].startswith("http://192.168.1.20:"), started["links"])
+        self.assertEqual(len(started["links"]), 2, "then the address this page was opened at")
+
     async def test_only_the_owner_asks_for_a_link(self):
         r = await self.client.post("/api/record", json={}, headers=H)
         self.assertEqual(r.status, 401)

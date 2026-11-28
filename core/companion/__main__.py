@@ -83,6 +83,19 @@ def find_inputs():
     return list(dict.fromkeys(paths))
 
 
+def lan_address():
+    """This computer's address on its home network (the one it would use to reach it), or ""."""
+    import socket
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("10.255.255.255", 1))     # nothing is sent: this only picks the way out
+        return probe.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        probe.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="The character device's core service.")
     parser.add_argument("--data", default="/var/lib/companion")
@@ -92,6 +105,8 @@ def main():
     parser.add_argument("--tls-port", type=int, default=443,
                         help="the device's own HTTPS, for a phone's live camera when the owner turns it on (0: never)")
     parser.add_argument("--no-audio", action="store_true", help="no microphone or speaker (testing)")
+    parser.add_argument("--no-updates", action="store_true",
+                        help="never look for device updates (the device's software running on a computer)")
     parser.add_argument("--button", default="auto", help="input device for the button, 'auto' or 'none'")
     parser.add_argument("--button-key", type=int, default=148, help="key code the button sends (148 = KEY_PROG1)")
     parser.add_argument("--log-level", default="INFO")
@@ -108,6 +123,11 @@ def main():
         device = Device(args.data, stage_socket=args.stage_socket, speaker=speaker, microphone=microphone, wifi=wifi)
         device.tls_port = args.tls_port or None     # web.py: the live camera's HTTPS
         device.web_host = args.host
+        device.updates = not args.no_updates
+        if wifi is None:                            # a computer, not the device: phones reach it here
+            device.lan_address = lan_address()
+            if device.lan_address:                  # and the screen says where, with no setup to wait for
+                device.setup_link = device.lan_address + ("" if args.port == 80 else ":%d" % args.port)
         device.start()
         inputs = find_inputs() if args.button == "auto" else ([] if args.button == "none" else [args.button])
         for path in inputs:

@@ -19,6 +19,8 @@ Low-cost ARM boards provide OpenGL ES, not desktop OpenGL 3.3.
 3. `src/texture.rs` — the off-screen emissive buffer is 8-bit on OpenGL ES,
    where rendering to float textures is an optional extension.
 4. `src/lib.rs` — helper `is_gles`.
+4a. `src/shader.rs` — on desktop OpenGL too, `#version 330 core` goes first, ahead of the licence
+    comment the shaders begin with (a Mac's driver is strict about anything before it).
 
 ## inox2d: opacity bindings
 

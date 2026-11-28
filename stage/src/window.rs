@@ -14,7 +14,7 @@ use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
 use glutin::config::ConfigTemplateBuilder;
-use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentContext, Version};
+use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentContext, Version};
 use glutin::display::GetGlDisplay;
 use glutin::prelude::*;
 use glutin::surface::SwapInterval;
@@ -72,8 +72,11 @@ impl AppFrame {
 		let es = ContextAttributesBuilder::new()
 			.with_context_api(ContextApi::Gles(Some(Version::new(3, 0))))
 			.build(raw_window_handle);
+		// The core profile: a Mac has no other above OpenGL 2.1, and asking for it everywhere keeps the
+		// desktop path honest (no habits that only a compatibility profile allows).
 		let desktop = ContextAttributesBuilder::new()
 			.with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+			.with_profile(GlProfile::Core)
 			.build(raw_window_handle);
 		let attempts = match preference {
 			GlPreference::Auto => vec![es, desktop],

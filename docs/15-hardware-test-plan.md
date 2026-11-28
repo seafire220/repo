@@ -44,6 +44,9 @@ they change a decision.
 
 ## Added on 2026-11-20
 
+Tests 34 to 36 can also be done before the device is built, with a Mac or a Linux PC standing in for it
+([35-try-on-a-computer.md](35-try-on-a-computer.md)).
+
 | # | Test | How | Pass |
 |---|---|---|---|
 | 21 | Power cuts | With an image built with power-cut protection: pull the plug 50 times, at random moments, ten of them while it saves (just after a reply, or while adding a character) | It always starts; the character, memories and settings are there (the last few seconds' change may be lost); `journalctl -b -u companion-data-check` shows repairs if any; `mount` shows `/` read-only |

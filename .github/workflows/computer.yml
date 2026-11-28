@@ -1,0 +1,74 @@
+name: The device's software on a computer
+
+# device/try-on-a-computer.sh runs the device's software on a Mac or a Linux PC, to try it with a phone on
+# the same Wi-Fi (docs/35-try-on-a-computer.md). This runs that script's own check on a real Mac (with
+# Apple's own Python, the one a Mac has after xcode-select --install) and on Linux: it sets everything up,
+# starts both halves, and checks that the settings page and the phone's page answer and the screen's
+# program draws. Then the stage's smoke test draws a picture with desktop OpenGL (all a Mac has).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "device/try-on-a-computer.sh"
+      - "stage/**"
+      - "core/companion/**"
+      - ".github/workflows/computer.yml"
+
+jobs:
+  computer:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      COMPANION_TRY: ${{ runner.temp }}/companion-try
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux only - a virtual display and software OpenGL
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q xvfb libgl1-mesa-dri libegl1 libxkbcommon-x11-0
+
+      - name: Set up, start, check (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          /usr/bin/python3 --version
+          PYTHON=/usr/bin/python3 device/try-on-a-computer.sh --check
+
+      - name: Set up, start, check (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a -s "-screen 0 1024x1024x24" device/try-on-a-computer.sh --check
+
+      - name: The live camera's certificate, made with this system's own openssl (a Mac's is LibreSSL)
+        run: |
+          export PATH="/usr/bin:/bin:$PATH"
+          openssl version
+          PYTHONPATH=core "$COMPANION_TRY/venv/bin/python" -c "
+          import sys
+          from companion import tls
+          cert, key, made = tls.ensure(sys.argv[1], ['192.168.1.20'])
+          tls.server_context(cert, key)
+          print('made', made, tls.fingerprint(cert))" "$RUNNER_TEMP/tls"
+          openssl x509 -in "$RUNNER_TEMP/tls/phone-cert.pem" -noout -text | grep -E "DNS:companion.local.*IP Address:192.168.1.20"
+
+      - name: The stage draws with desktop OpenGL
+        run: |
+          "$COMPANION_TRY/venv/bin/python" stage/tools/smoke_test.py "$COMPANION_TRY/stage-build/release/stage" \
+            "$RUNNER_TEMP/smoke" --gl desktop
+
+      - name: Logs, if anything failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/companion-try/*.log
+            ${{ runner.temp }}/smoke
+          if-no-files-found: ignore

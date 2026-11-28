@@ -51,19 +51,21 @@ def ensure(folder, addresses=(), names=NAMES, now=None):
     if not available():
         raise OSError("this device has no openssl to make its certificate")
     os.makedirs(folder, mode=0o700, exist_ok=True)
-    alt = ["DNS:%s" % n for n in names] + ["IP:%s" % a for a in addresses if a]
+    alt = ["DNS:%s" % n for n in names] + ["IP:%s" % a for a in dict.fromkeys(addresses) if a]
     staged = tempfile.mkdtemp(prefix=".tls-", dir=folder)
     try:
-        new_cert, new_key = os.path.join(staged, CERT), os.path.join(staged, KEY)
-        subprocess.run(
-            ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-sha256",
-             "-days", str(DAYS), "-nodes", "-keyout", new_key, "-out", new_cert,
-             "-subj", "/CN=Character device on your home network",
-             "-addext", "subjectAltName=" + ",".join(alt),
-             "-addext", "extendedKeyUsage=serverAuth",
-             "-addext", "keyUsage=critical,digitalSignature",
-             "-addext", "basicConstraints=critical,CA:FALSE"],
-            capture_output=True, timeout=60, check=True)
+        new_cert, new_key, conf = (os.path.join(staged, name) for name in (CERT, KEY, "request.cnf"))
+        # The key in a step of its own and the rest from a settings file: the forms every OpenSSL and every
+        # LibreSSL (a Mac's openssl) accept, where newer short-cuts (-addext) are not everywhere.
+        with open(conf, "w", encoding="ascii") as f:
+            f.write("[req]\nprompt = no\ndistinguished_name = dn\nx509_extensions = ext\n"
+                    "[dn]\nCN = Character device on your home network\n"
+                    "[ext]\nsubjectAltName = %s\nextendedKeyUsage = serverAuth\n"
+                    "keyUsage = critical, digitalSignature\nbasicConstraints = critical, CA:FALSE\n" % ", ".join(alt))
+        for command in (["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", new_key],
+                        ["openssl", "req", "-new", "-x509", "-key", new_key, "-sha256", "-days", str(DAYS),
+                         "-config", conf, "-out", new_cert]):
+            subprocess.run(command, capture_output=True, timeout=60, check=True)
         os.chmod(new_key, 0o600)
         os.replace(new_key, key)
         os.replace(new_cert, cert)
