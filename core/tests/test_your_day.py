@@ -580,6 +580,7 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_clock_shows_while_nobody_is_talking(self):
         self.device.store.update_settings({"clock": {"show": "idle", "hours": "24"},
                                            "weather": {"provider": "weatherapi", "place": PERTH}})
+        self.fetch.weatherapi = weatherapi_doc(start=at(7))      # a forecast that covers 7:42 whenever this runs
         await self.device.weather_now()
         shown = self.device.clock_step(at(7, 42))
         self.assertEqual(shown[0], "07:42")

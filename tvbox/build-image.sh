@@ -18,6 +18,11 @@
 #   --grow SIZE          extra space for the software (default 2G)
 #   --version V          the software's version (default: core/companion/VERSION)
 #   --ssh-key FILE       let this public key log in as root over SSH: a maker's test image, never one to sell
+#   --rotate DEGREES     the picture turned for a screen standing on its side (90, or 270): the desk device
+#                        (docs/38-tv-box-desk-device.md). Without it the picture is as the screen has it (a TV)
+#   --installer          an installer card: at its first start in a box it copies itself onto the box's own
+#                        memory, erasing Android, and switches the box off (bin/companion-tvbox-install), so
+#                        each unit needs no card of its own
 #   --compress           also write OUT.img.xz and its SHA-256 sum
 #
 # The system stays writable: power-cut protection, as the Pi image has, is not done for TV boxes yet
@@ -32,6 +37,8 @@ COMPRESS=0
 VERSION=""
 BOARD=x96-max-plus
 SSH_KEY=""
+ROTATE=""
+INSTALLER=0
 ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -40,12 +47,14 @@ while [ $# -gt 0 ]; do
         --grow) GROW="$2"; shift 2 ;;
         --version) VERSION="$2"; shift 2 ;;
         --ssh-key) SSH_KEY="$2"; shift 2 ;;
+        --rotate) ROTATE="$2"; shift 2 ;;
+        --installer) INSTALLER=1; shift ;;
         --compress) COMPRESS=1; shift ;;
-        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
         *) ARGS+=("$1"); shift ;;
     esac
 done
-[ ${#ARGS[@]} -eq 2 ] || { sed -n '2,27p' "$0"; exit 2; }
+[ ${#ARGS[@]} -eq 2 ] || { sed -n '2,32p' "$0"; exit 2; }
 SOURCE="${ARGS[0]}"
 OUT="${ARGS[1]}"
 
@@ -56,6 +65,8 @@ for tool in gzip xz sfdisk losetup e2fsck resize2fs mtype mcopy mdir; do
 done
 DTB="$(awk -F '\t' -v key="$BOARD" '$1 == key {print $2}' "$REPO/tvbox/boards.tsv")"
 [ -n "$DTB" ] || { echo "unknown board: $BOARD (see tvbox/boards.tsv)" >&2; exit 2; }
+MODEL_ID="$(awk -F '\t' -v key="$BOARD" '$1 == key {print $3}' "$REPO/tvbox/boards.tsv")"
+case "$ROTATE" in ''|0|90|180|270) ;; *) echo "--rotate takes 0, 90, 180 or 270" >&2; exit 2 ;; esac
 [ -x "$STAGE_BINARY" ] || { echo "no stage program at $STAGE_BINARY (see stage/README.md)" >&2; exit 1; }
 if [ -n "$SSH_KEY" ] && [ ! -f "$SSH_KEY" ]; then echo "no public key at $SSH_KEY" >&2; exit 2; fi
 if [ "$(uname -m)" != "aarch64" ] && [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
@@ -122,6 +133,8 @@ if [ -n "$SSH_KEY" ]; then
     install -m 0644 "$SSH_KEY" "$SRC/ssh-key.pub"
     KEY_ARG=(--ssh-key /tmp/companion-src/ssh-key.pub)
 fi
+[ -z "$ROTATE" ] || KEY_ARG+=(--rotate "$ROTATE")
+[ "$INSTALLER" = 0 ] || KEY_ARG+=(--installer "$MODEL_ID")
 
 say "Installing inside the image (this takes a while)"
 chroot "$ROOT" env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 \
@@ -130,7 +143,7 @@ chroot "$ROOT" env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8
     PIP_CERT=/etc/ssl/certs/ca-certificates.crt REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     /tmp/companion-src/tvbox/install.sh --image --stage-binary /tmp/companion-src/stage-binary \
     ${VERSION:+--version "$VERSION"} "${KEY_ARG[@]}"
-printf 'board=%s\ndtb=%s\n' "$BOARD" "$DTB" > "$ROOT/etc/companion-tvbox"
+printf 'board=%s\ndtb=%s\nmodel_id=%s\n' "$BOARD" "$DTB" "$MODEL_ID" > "$ROOT/etc/companion-tvbox"
 
 say "Tidying up"
 rm -rf "$SRC"

@@ -1,0 +1,23 @@
+[Unit]
+Description=Character device: copy it onto the box's own memory (an installer card)
+# Only on an installer card (tvbox/build-image.sh --installer); on any other card, and on every unit, it is
+# skipped at once.
+ConditionPathExists=/etc/companion/installer
+After=local-fs.target
+# The character's services wait for it: they never start from an installer card.
+Before=companion-core.service companion-stage.service getty@tty1.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/companion-tvbox/companion-tvbox-install
+# Its words on the screen.
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

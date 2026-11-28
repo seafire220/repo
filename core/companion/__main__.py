@@ -8,9 +8,11 @@ switch, if fitted, is a second one (key 248). On a desktop, any keyboard device
 and key code can be used instead, and the console's "button" does the same job.
 
 On a TV box (tvbox/README.md) the button is any of several keys on any input device that has one: the box's
-remote (its OK button), the TV's own remote through HDMI-CEC, a USB button or a keyboard (Enter). There the
-remote's volume keys change the volume and its mute key turns the microphone off or on. /etc/default/companion
-sets these: COMPANION_BUTTON=any, COMPANION_BUTTON_KEYS=352,353,28,96,164 and COMPANION_REMOTE_KEYS=1.
+remote (its OK button), the TV's own remote through HDMI-CEC, a USB button or a keyboard (Enter), or the desk
+device's USB button board (tvbox/button-board: Play/Pause). There the remote's volume keys change the volume and
+its mute key turns the microphone off or on, and the button board's mute switch is held down as key 248, as the
+Pi's is. /etc/default/companion sets these: COMPANION_BUTTON=any, COMPANION_BUTTON_KEYS=352,353,28,96,164 and
+COMPANION_REMOTE_KEYS=1 (and COMPANION_MUTE_KEY, for a switch that sends another key).
 """
 import argparse
 import asyncio
@@ -53,13 +55,28 @@ def _has_bit(bits, key):
     return len(bits) > key // 8 and bool(bits[key // 8] >> (key % 8) & 1)
 
 
-async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE, remote=False, retry=True):
+def _switch(device, switches, path, held):
+    """A mute switch's position. Alone (a Pi's switch), it is the switch. Among several devices that could
+    send the switch's key (watch_inputs: the button board, and perhaps a headset's mute button), the
+    microphone is off while any of them holds it down, and opening one that does not leaves another's alone."""
+    if switches is None:
+        device.set_switch(held)
+        return
+    switches[path] = held
+    on = any(switches.values())
+    if on != bool(getattr(device, "mic_switch", False)):
+        device.set_switch(on)
+
+
+async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE, remote=False, retry=True,
+                      switches=None):
     """The button and the mute switch, from a Linux input device: the button going down and up (the
     device tells a press from a hold, device.button_down and button_up), and the switch's position, read
     when the device is opened and then as it moves (device.set_switch). `button_key` is one key code or several
     (any of them is the button). With `remote`, a remote's volume keys step the volume (device.change_volume)
-    and its mute key turns the microphone off or on (device.toggle_microphone). Reopens the device if it goes
-    away (or, without `retry`, returns: watch_inputs looks for it again)."""
+    and its mute key turns the microphone off or on (device.toggle_microphone). `switches`, shared between the
+    devices watch_inputs reads, holds each one's switch (_switch). Reopens the device if it goes away (or,
+    without `retry`, returns: watch_inputs looks for it again)."""
     log = logging.getLogger("companion.button")
     button_keys = set(button_key) if isinstance(button_key, (set, frozenset, list, tuple)) else {button_key}
     while True:
@@ -67,7 +84,7 @@ async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE, 
             with open(path, "rb", buffering=0) as f:
                 log.info("reading the button and switch from %s", path)
                 if _has_bit(_key_bits(f.fileno(), EVIOCGBIT_KEY), mute_key):
-                    device.set_switch(_has_bit(_key_bits(f.fileno(), EVIOCGKEY), mute_key))
+                    _switch(device, switches, path, _has_bit(_key_bits(f.fileno(), EVIOCGKEY), mute_key))
                 loop = asyncio.get_running_loop()
                 down, down_key, stepped = None, None, 0.0
                 while True:
@@ -87,7 +104,7 @@ async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE, 
                     if value == 2:                    # 2 is a key repeating while held
                         continue
                     if key == mute_key:
-                        device.set_switch(value == 1)
+                        _switch(device, switches, path, value == 1)
                     elif remote and key == KEY_MUTE:
                         if value == 1:
                             device.toggle_microphone()
@@ -101,9 +118,15 @@ async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE, 
         except OSError as error:
             if not retry:
                 log.info("input device %s went away (%s)", path, error)
+                if switches is not None:
+                    # Forgotten, but the microphone stays as it was: a board unplugged with its switch on
+                    # leaves the microphone off until a switch says otherwise.
+                    switches.pop(path, None)
                 return
             log.warning("button device unavailable (%s); retrying", error)
         if not retry:
+            if switches is not None:
+                switches.pop(path, None)
             return
         await asyncio.sleep(2.0)
 
@@ -133,15 +156,16 @@ def find_inputs_with(keys, paths=None, key_bits=_device_keys):
     return found
 
 
-async def watch_inputs(device, button_keys, remote=False, every=5.0, find=find_inputs_with):
-    """Read every input device that has a button key (or, with `remote`, a volume or mute key), and the ones
-    plugged in later (a USB button, a keyboard)."""
-    keys = set(button_keys) | ({KEY_MUTE} | set(REMOTE_KEYS) if remote else set())
-    reading = {}
+async def watch_inputs(device, button_keys, remote=False, every=5.0, find=find_inputs_with, mute_key=KEY_MICMUTE):
+    """Read every input device that has a button key or the mute switch's key (or, with `remote`, a volume or
+    mute key), and the ones plugged in later (a USB button, a keyboard, the desk device's button board)."""
+    keys = set(button_keys) | {mute_key} | ({KEY_MUTE} | set(REMOTE_KEYS) if remote else set())
+    reading, switches = {}, {}
     while True:
         for path in find(keys):
             if path not in reading or reading[path].done():
-                reading[path] = asyncio.ensure_future(read_inputs(path, device, button_keys, remote=remote, retry=False))
+                reading[path] = asyncio.ensure_future(read_inputs(path, device, button_keys, mute_key=mute_key,
+                                                                  remote=remote, retry=False, switches=switches))
         await asyncio.sleep(every)
 
 
@@ -184,6 +208,10 @@ def main():
     parser.add_argument("--button-key", default=os.environ.get("COMPANION_BUTTON_KEYS", str(KEY_PROG1)),
                         help="key codes the button sends, separated by commas (148 = KEY_PROG1; a TV box's: "
                              "352,353,28,96,164)")
+    mute_key = os.environ.get("COMPANION_MUTE_KEY", "").strip()
+    parser.add_argument("--mute-key", type=int, default=int(mute_key) if mute_key.isdigit() else KEY_MICMUTE,
+                        help="the key a mute switch holds down while the microphone is off (248 = KEY_MICMUTE: the "
+                             "Pi's switch and the TV box's button board)")
     parser.add_argument("--remote-keys", action="store_true",
                         default=os.environ.get("COMPANION_REMOTE_KEYS", "").lower() in ("1", "yes", "on", "true"),
                         help="a remote's volume keys change the volume, and its mute key turns the microphone off or on")
@@ -209,11 +237,11 @@ def main():
         device.start()
         keys = key_codes(args.button_key)
         if args.button == "any":
-            asyncio.ensure_future(watch_inputs(device, keys, remote=args.remote_keys))
+            asyncio.ensure_future(watch_inputs(device, keys, remote=args.remote_keys, mute_key=args.mute_key))
         else:
             inputs = find_inputs() if args.button == "auto" else ([] if args.button == "none" else [args.button])
             for path in inputs:
-                asyncio.ensure_future(read_inputs(path, device, keys, remote=args.remote_keys))
+                asyncio.ensure_future(read_inputs(path, device, keys, mute_key=args.mute_key, remote=args.remote_keys))
         runner = web.AppRunner(make_app(device), access_log=None)
         await runner.setup()
         await web.TCPSite(runner, args.host, args.port).start()

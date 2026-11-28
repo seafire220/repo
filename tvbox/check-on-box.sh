@@ -12,18 +12,21 @@ show() { "$@" 2>&1 | sed 's/^/   /'; }
 line "The box"
 show cat /proc/device-tree/model; echo
 show uname -r
-show grep -E '^(board|dtb)=' /etc/companion-tvbox
+show grep -E '^(board|dtb|model_id)=' /etc/companion-tvbox
 show sh -c "grep -E '^FDT=' /boot/uEnv.txt"
+show sh -c "findmnt -n -o SOURCE / | sed 's/^/started from /'; ls /dev/mmcblk*boot0 2>/dev/null | sed 's/boot0\$/: the box'\\''s own memory (eMMC)/'"
 show free -m
 for zone in /sys/class/thermal/thermal_zone*/temp; do [ -r "$zone" ] && echo "   temperature: $(( $(cat "$zone") / 1000 )) C"; done
 
 line "Graphics (Panfrost, Mali-G31) and the screen"
 show sh -c "lsmod | grep -E '^(panfrost|meson_drm)' || echo 'panfrost not loaded'"
 show sh -c "ls -l /dev/dri/"
-show sh -c "journalctl -b -u companion-stage --no-pager | grep -iE 'Output|mode|kiosk|GL|renderer|fps|error' | tail -n 25"
+show sh -c "for c in /sys/class/drm/card*-HDMI-A-*; do echo \"\$(basename \$c): \$(cat \$c/status) \$(head -n 3 \$c/modes | tr '\\n' ' ')\"; done"
+show sh -c "grep -E '^(mode|transform)=' /run/companion-tvbox/weston.ini || echo 'the screen service has not started'"
+show sh -c "journalctl -b -u companion-stage --no-pager | grep -iE 'the screen:|Output|mode|kiosk|GL|renderer|fps|error' | tail -n 25"
 
 line "Services"
-for unit in companion-core companion-stage companion-tvbox-sound companion-tvbox-cec NetworkManager; do
+for unit in companion-core companion-stage companion-tvbox-sound companion-tvbox-cec companion-tvbox-install NetworkManager; do
     echo "   $unit: $(systemctl is-active "$unit" 2>/dev/null)"
 done
 
@@ -32,11 +35,11 @@ show cat /proc/asound/cards
 show sh -c "aplay -l | grep '^card'"
 show sh -c "arecord -l | grep '^card' || echo 'no microphone'"
 
-line "Buttons: input devices with OK, Select, Enter or Play/Pause"
+line "Buttons: input devices with OK, Select, Enter or Play/Pause, or a mute switch (the button board)"
 show /opt/companion/venv/bin/python - <<'PY'
 import sys
 sys.path.insert(0, "/opt/companion/core")
-from companion.__main__ import find_inputs_with, KEY_OK, KEY_SELECT, KEY_ENTER, KEY_KPENTER, KEY_PLAYPAUSE
+from companion.__main__ import find_inputs_with, KEY_OK, KEY_SELECT, KEY_ENTER, KEY_KPENTER, KEY_PLAYPAUSE, KEY_MICMUTE
 names = {}
 try:
     block = open("/proc/bus/input/devices").read().split("\n\n")
@@ -49,7 +52,7 @@ try:
                         names["/dev/input/" + h] = name
 except OSError:
     pass
-found = find_inputs_with({KEY_OK, KEY_SELECT, KEY_ENTER, KEY_KPENTER, KEY_PLAYPAUSE})
+found = find_inputs_with({KEY_OK, KEY_SELECT, KEY_ENTER, KEY_KPENTER, KEY_PLAYPAUSE, KEY_MICMUTE})
 print("\n".join("%s  %s" % (p, names.get(p, "")) for p in found) or "none: plug in a USB button or keyboard, or check the remote")
 PY
 

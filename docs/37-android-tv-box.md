@@ -2,7 +2,9 @@
 
 Status: 2026-11-28. Assessment first ("don't do this yet"); then the owner asked for the variant, and it is
 **built** the recommended way (A, below) in its own folder: [`tvbox/README.md`](../tvbox/README.md) (D-076).
-Not yet tried on a box: the hardware tests are T1 to T10 in `15-hardware-test-plan.md`.
+Not yet tried on a box: the hardware tests are T1 to T18 in `15-hardware-test-plan.md`. The desk device built
+around a box instead of a Pi, with the Pi build's parts: [`38-tv-box-desk-device.md`](38-tv-box-desk-device.md)
+(D-077).
 
 ## The short answer
 

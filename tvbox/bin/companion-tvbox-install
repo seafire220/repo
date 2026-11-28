@@ -1,0 +1,86 @@
+#!/bin/bash
+# An installer card (tvbox/build-image.sh --installer; tvbox/README.md, "Making many"): copies the character
+# device onto the TV box's own memory (its eMMC, erasing Android), then switches the box off. Each unit then
+# starts from its own memory and needs no card; the same card does the next box.
+#
+# Runs at start, before the character's services (config/companion-tvbox-install.service), with its words on the
+# screen. Does nothing unless the card says it is an installer (/etc/companion/installer, MODEL_ID=the box's
+# number in the community installer's list), and nothing on a box already running from its own memory. The copy
+# itself is the community project's armbian-install, answered with the box and ext4; then the copy is made a
+# unit of its own (no installer mark, no identity of the card's).
+set -uo pipefail
+MARK="${COMPANION_INSTALLER:-/etc/companion/installer}"
+DEV="${COMPANION_DEV:-/dev}"
+ROOT="${COMPANION_ROOT:-}"                       # where the card's own files are (tests)
+LOG="${COMPANION_INSTALL_LOG:-/var/log/companion-install.log}"
+MOUNT_AT="${COMPANION_INSTALL_MOUNT:-/run/companion-install}"
+WAIT_AFTER="${COMPANION_INSTALL_WAIT:-15}"
+
+[ -f "$MARK" ] || exit 0
+MODEL_ID="$(sed -n 's/^MODEL_ID=\([0-9]\{1,4\}\)[[:space:]]*$/\1/p' "$MARK" | head -n 1)"
+
+say() { printf '\n  %s\n' "$@"; }
+stay() {   # the message stays on the screen, and the character's software does not start from the card
+    say "$@"
+    if [ -n "${COMPANION_INSTALL_NO_WAIT:-}" ]; then exit 1; fi
+    exec sleep infinity
+}
+
+# Started from the box's own memory (an eMMC has boot0 beside it; a card or a USB stick has not): a unit.
+root_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+root_disk="$(basename "${root_source:-none}")"
+root_disk="${root_disk%p[0-9]*}"
+if [ -e "$DEV/${root_disk}boot0" ]; then
+    exit 0
+fi
+
+emmc=""
+for boot0 in "$DEV"/mmcblk*boot0; do
+    [ -e "$boot0" ] || continue
+    emmc="$(basename "$boot0")"
+    emmc="${emmc%boot0}"
+    break
+done
+printf '\033[2J\033[H'
+say "THE CHARACTER DEVICE: INSTALLER CARD"
+[ -n "$emmc" ] || stay "This box has no memory of its own to copy to." \
+    "Switch it off and take the card out. (A card that is not an installer runs the device from the card.)"
+[ -n "$MODEL_ID" ] || stay "The card does not say which box it is for (MODEL_ID in $MARK). Make it again."
+
+# Already done: the box's memory holds the character device. Nothing is changed.
+mkdir -p "$MOUNT_AT"
+if mount -o ro "$DEV/${emmc}p2" "$MOUNT_AT" 2>/dev/null; then
+    installed=0
+    [ -f "$MOUNT_AT/etc/companion-tvbox" ] && installed=1
+    umount "$MOUNT_AT" 2>/dev/null || true
+    [ "$installed" = 0 ] || stay "This box already has the character device in its own memory." \
+        "Switch it off, take the card out, and plug it in again."
+fi
+
+say "Copying the character device onto this box's own memory. Android on it is erased." \
+    "This takes about ten minutes: leave the box plugged in. It switches itself off when it has finished."
+
+# The copy is a unit of its own: nothing that identifies this card goes with it (each unit makes its own at
+# its first start).
+: > "$ROOT/etc/machine-id"
+[ -L "$ROOT/var/lib/dbus/machine-id" ] || rm -f "$ROOT/var/lib/dbus/machine-id"
+rm -f "$ROOT/var/lib/systemd/random-seed" "$ROOT/var/lib/systemd/credential.secret"
+rm -f "$ROOT"/var/lib/NetworkManager/*.lease
+
+# armbian-install asks two questions: the box's number in its list, then the filing system (1: ext4).
+if ! printf '%s\n1\n' "$MODEL_ID" | armbian-install -m no -a yes 2>&1 | tee "$LOG" \
+        || ! grep -q "Installation completed successfully" "$LOG"; then
+    stay "The copy did not finish (the lines above; all of them are in $LOG on the card)." \
+        "Nothing has been started. Switch the box off and try again."
+fi
+
+# The copy starts as an ordinary unit, not as an installer.
+if mount "$DEV/${emmc}p2" "$MOUNT_AT" 2>/dev/null; then
+    rm -f "$MOUNT_AT/etc/companion/installer"
+    umount "$MOUNT_AT" 2>/dev/null || true
+fi
+
+say "Done. The box switches itself off in $WAIT_AFTER seconds." \
+    "Then take the card out, and plug the box in again: it starts from its own memory."
+sleep "$WAIT_AFTER"
+systemctl poweroff

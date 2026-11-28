@@ -1,0 +1,119 @@
+#!/bin/sh
+# The screen's settings for Weston, worked out each time the screen service starts (tvbox/README.md, "The
+# screen"): the picture at the screen's own size, so a small screen gets a sharp picture at a fraction of the
+# work, but never more than 1920x1080 (a 4K TV's picture is four times the work, too much for the box's
+# graphics); and turned for a screen standing on its side.
+#
+# Reads /etc/companion/weston.ini (the owner's settings) and writes /run/companion-tvbox/weston.ini, which
+# Weston starts with (config/companion-stage-tvbox.conf). Its own settings, in /etc/default/companion:
+#   COMPANION_SCREEN_MODE=auto     the screen's own size, at most 1920x1080 (default); or a size, such as 1280x720
+#   COMPANION_SCREEN_ROTATE=90     the picture turned for a screen on its side: 0, 90, 180 or 270
+# A mode= or transform= written in /etc/companion/weston.ini is kept when these are not set.
+#
+# It always succeeds, so the screen starts whatever happens here.
+set -u
+TEMPLATE="${COMPANION_WESTON_TEMPLATE:-/etc/companion/weston.ini}"
+OUT="${COMPANION_WESTON_CONFIG:-/run/companion-tvbox/weston.ini}"
+DRM="${COMPANION_DRM:-/sys/class/drm}"
+MAX_PIXELS=2073600     # 1920 x 1080
+
+template_value() {     # the first KEY=value of the [output] section of the owner's settings
+    [ -r "$TEMPLATE" ] || return 0
+    awk -v key="$1" '
+        /^[[:space:]]*\[/ { inside = ($0 ~ /^[[:space:]]*\[output\][[:space:]]*$/); next }
+        inside && $0 ~ ("^[[:space:]]*" key "[[:space:]]*=") {
+            sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); print; exit
+        }' "$TEMPLATE"
+}
+
+screen_modes() {       # the modes of the first HDMI screen plugged in, its preferred one first (the kernel's order)
+    for connector in "$DRM"/card*-HDMI-A-*; do
+        [ -s "$connector/modes" ] || continue
+        [ "$(cat "$connector/status" 2>/dev/null)" = connected ] || continue
+        cat "$connector/modes"
+        return 0
+    done
+}
+
+screen_mode() {        # the preferred mode if no bigger than 1920x1080; else 1080p, or the biggest mode that fits
+    screen_modes | awk -v max="$MAX_PIXELS" '
+        /^[0-9]+x[0-9]+$/ {
+            split($0, wh, "x"); pixels = wh[1] * wh[2]
+            if (!seen) { seen = 1; if (pixels <= max) { print; done = 1; exit } }
+            if ($0 == "1920x1080") full_hd = 1
+            if (fits == "" && pixels <= max) fits = $0
+        }
+        END {
+            if (done) exit
+            if (full_hd || fits == "") print "1920x1080"; else print fits
+        }'
+}
+
+valid_mode() {         # a size (1280x720, 1280x720@60), preferred, current, or a modeline: nothing else goes in
+    case "$1" in *"
+"*) return 1 ;; esac   # one line only
+    printf '%s\n' "$1" | grep -Eqx '([0-9]{2,4}x[0-9]{2,4}(@[0-9]{1,3}(\.[0-9]+)?)?|preferred|current|[0-9]+(\.[0-9]+)?( [0-9]+){8}( [+-][hv]sync)*)'
+}
+
+MODE="${COMPANION_SCREEN_MODE:-auto}"
+if [ "$MODE" = auto ]; then
+    MODE="$(template_value mode)"
+    case "$MODE" in ''|auto) MODE="$(screen_mode)" ;; esac
+fi
+if ! valid_mode "$MODE"; then
+    echo "the screen: \"$MODE\" is not a mode Weston knows (such as 1280x720); using the screen's own" >&2
+    MODE="$(screen_mode)"
+fi
+
+ROTATE="${COMPANION_SCREEN_ROTATE:-}"
+case "$ROTATE" in
+    '') TRANSFORM="$(template_value transform)" ;;
+    0|normal) TRANSFORM=normal ;;
+    90|180|270) TRANSFORM="rotate-$ROTATE" ;;
+    rotate-90|rotate-180|rotate-270|flipped|flipped-rotate-90|flipped-rotate-180|flipped-rotate-270) TRANSFORM="$ROTATE" ;;
+    *) echo "the screen: COMPANION_SCREEN_ROTATE=$ROTATE is not 0, 90, 180 or 270; not turned" >&2
+       TRANSFORM="$(template_value transform)" ;;
+esac
+case "$TRANSFORM" in
+    ''|normal|rotate-90|rotate-180|rotate-270|flipped|flipped-rotate-90|flipped-rotate-180|flipped-rotate-270) ;;
+    *) TRANSFORM="" ;;
+esac
+
+render() {
+    if [ -r "$TEMPLATE" ]; then
+        awk -v mode="$MODE" -v transform="$TRANSFORM" '
+            /^[[:space:]]*\[/ {
+                print
+                inside = ($0 ~ /^[[:space:]]*\[output\][[:space:]]*$/)
+                if (inside) { outputs++; print "mode=" mode; if (transform != "") print "transform=" transform }
+                next
+            }
+            inside && /^[[:space:]]*(mode|transform)[[:space:]]*=/ { next }
+            { print }
+            END {
+                if (!outputs) {
+                    print ""; print "[output]"; print "name=HDMI-A-1"; print "mode=" mode
+                    if (transform != "") print "transform=" transform
+                }
+            }' "$TEMPLATE"
+    else
+        printf '[core]\nshell=kiosk-shell.so\nidle-time=0\nrequire-input=false\n\n[output]\nname=HDMI-A-1\nmode=%s\n' "$MODE"
+        [ -z "$TRANSFORM" ] || printf 'transform=%s\n' "$TRANSFORM"
+        printf '\n[autolaunch]\npath=/usr/local/lib/companion-tvbox/stage-in-weston\nwatch=true\n'
+    fi
+}
+
+if [ -n "${COMPANION_DRY_RUN:-}" ]; then
+    render
+    exit 0
+fi
+mkdir -p "$(dirname "$OUT")" && chmod 0755 "$(dirname "$OUT")"
+if render > "$OUT.new" && [ -s "$OUT.new" ]; then
+    chmod 0644 "$OUT.new"
+    mv -f "$OUT.new" "$OUT"
+else
+    rm -f "$OUT.new"
+    cp "$TEMPLATE" "$OUT" 2>/dev/null || true
+fi
+echo "the screen: $MODE${TRANSFORM:+, $TRANSFORM}"
+exit 0

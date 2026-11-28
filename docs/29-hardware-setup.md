@@ -9,6 +9,10 @@ It brings together `05-hardware-and-bom.md` (parts), `22-board-options.md`
 (which board), `13-build-and-install.md` (installing), `18-out-of-the-box.md`
 (the ready-made card image) and `15-hardware-test-plan.md` (tests).
 
+A cheaper build around an S905X3 TV box instead of the Pi, with most of these
+same parts (a 7" HDMI screen instead of the Touch Display 2, and the buttons on
+a small USB board): `38-tv-box-desk-device.md`.
+
 ## 1. What to buy
 
 The board recommendation changed after the parts list was written: a

@@ -1,28 +1,34 @@
 #!/bin/bash
 # Check that a TV box image (tvbox/build-image.sh) is set up to work out of the box.
 #
-#   sudo ./tvbox/check-image.sh companion-tvbox.img [--board KEY] [--with-ssh-key]
+#   sudo ./tvbox/check-image.sh companion-tvbox.img [--board KEY] [--with-ssh-key] [--rotate DEGREES] [--installer]
 #
 # Mounts the image read-only and checks: the software and models are installed, the services are enabled,
-# the screen runs under Weston's kiosk shell at 1920x1080, the remote and USB buttons are listened to, root's
+# the screen runs under Weston's kiosk shell at the screen's own size (at most 1920x1080, turned with
+# --rotate), the remote, USB buttons and the button board are listened to, an installer card is one, root's
 # password is locked and remote login is off (or, with --with-ssh-key, open to a key only), no API keys or
 # owner data are inside, and the card's boot settings name the board's device tree. Exit status 0 means every
 # check passed.
 set -uo pipefail
 
-IMG="${1:?usage: check-image.sh IMAGE [--board KEY] [--with-ssh-key]}"
+IMG="${1:?usage: check-image.sh IMAGE [--board KEY] [--with-ssh-key] [--rotate DEGREES] [--installer]}"
 shift
 BOARD=x96-max-plus
 WITH_KEY=0
+ROTATE=""
+INSTALLER=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --board) BOARD="$2"; shift 2 ;;
         --with-ssh-key) WITH_KEY=1; shift ;;
+        --rotate) ROTATE="$2"; shift 2 ;;
+        --installer) INSTALLER=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DTB="$(awk -F '\t' -v key="$BOARD" '$1 == key {print $2}' "$HERE/boards.tsv")"
+MODEL_ID="$(awk -F '\t' -v key="$BOARD" '$1 == key {print $3}' "$HERE/boards.tsv")"
 [ "$(id -u)" -eq 0 ] || { echo "run this with sudo" >&2; exit 1; }
 WORK="$(mktemp -d)"
 ROOT="$WORK/root"
@@ -71,12 +77,28 @@ check "no login prompt on the screen (getty on tty1 off)" absent_or_disabled get
 check "NetworkManager looks after the network" enabled multi-user.target NetworkManager.service
 check "and the Ethernet socket too (netplan, where the image has it)" sh -c "! test -d '$ROOT/etc/netplan' || grep -q 'renderer: NetworkManager' '$ROOT/etc/netplan/90-companion-networkmanager.yaml'"
 check "Weston and its kiosk shell installed" sh -c "test -x '$ROOT/usr/bin/weston' && ls '$ROOT'/usr/lib/*/weston/kiosk-shell.so"
-check "the screen: Weston's kiosk shell instead of cage (a drop-in that updates leave alone)" sh -c "grep -q '^ExecStart=\$' '$ROOT/etc/systemd/system/companion-stage.service.d/tvbox.conf' && grep -q '^ExecStart=/usr/bin/weston --config=/etc/companion/weston.ini' '$ROOT/etc/systemd/system/companion-stage.service.d/tvbox.conf'"
-check "the screen: 1920x1080, never blanking, the character launched" sh -c "grep -qx 'mode=1920x1080' '$ROOT/etc/companion/weston.ini' && grep -q '^idle-time=0' '$ROOT/etc/companion/weston.ini' && grep -q '^path=/usr/local/lib/companion-tvbox/stage-in-weston' '$ROOT/etc/companion/weston.ini'"
+DROPIN="$ROOT/etc/systemd/system/companion-stage.service.d/tvbox.conf"
+check "the screen: Weston's kiosk shell instead of cage (a drop-in that updates leave alone)" sh -c "grep -q '^ExecStart=\$' '$DROPIN' && grep -q '^ExecStart=/usr/bin/weston --config=/run/companion-tvbox/weston.ini' '$DROPIN'"
+check "the screen: its size and turn worked out at each start" sh -c "grep -q '^ExecStartPre=+/usr/local/lib/companion-tvbox/companion-tvbox-screen' '$DROPIN' && test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-screen'"
+check "the screen: its own size up to 1920x1080, never blanking, the character launched" sh -c "grep -qx 'mode=auto' '$ROOT/etc/companion/weston.ini' && grep -q '^idle-time=0' '$ROOT/etc/companion/weston.ini' && grep -q '^path=/usr/local/lib/companion-tvbox/stage-in-weston' '$ROOT/etc/companion/weston.ini'"
+check "the screen's settings come out whole (a 4K TV gets 1080p)" sh -c "d=\$(mktemp -d) && mkdir \$d/card0-HDMI-A-1 && echo connected > \$d/card0-HDMI-A-1/status && printf '3840x2160\\n1920x1080\\n' > \$d/card0-HDMI-A-1/modes && COMPANION_DRY_RUN=1 COMPANION_DRM=\$d COMPANION_WESTON_TEMPLATE='$ROOT/etc/companion/weston.ini' sh '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-screen' | grep -qx 'mode=1920x1080'; r=\$?; rm -r \$d; exit \$r"
+if [ -n "$ROTATE" ]; then
+    check "the picture turned for a screen on its side ($ROTATE)" grep -qx "COMPANION_SCREEN_ROTATE=$ROTATE" "$ROOT/etc/default/companion"
+else
+    check "the picture as the screen has it (not turned)" sh -c "! grep -q '^COMPANION_SCREEN_ROTATE=' '$ROOT/etc/default/companion'"
+fi
 check "the character's program is run with the screen service's own arguments" sh -c "COMPANION_DRY_RUN=1 COMPANION_STAGE_UNIT='$ROOT/etc/systemd/system/companion-stage.service' sh '$ROOT/usr/local/lib/companion-tvbox/stage-in-weston' | grep -q '^/opt/companion/bin/stage /var/lib/companion/current.inp '"
 check "the remote's OK, Enter on a USB button or keyboard, and the remote's volume and mute keys" sh -c "grep -q '^COMPANION_BUTTON=any' '$ROOT/etc/default/companion' && grep -q '^COMPANION_BUTTON_KEYS=352,353,28,96,164' '$ROOT/etc/default/companion' && grep -q '^COMPANION_REMOTE_KEYS=1' '$ROOT/etc/default/companion'"
 check "the box's own sound card is routed to HDMI at each start" sh -c "test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-sound' && test -L '$ROOT/etc/systemd/system/multi-user.target.wants/companion-tvbox-sound.service'"
 check "HDMI-CEC ready for the TV's own remote (off until turned on)" sh -c "test -x '$ROOT/usr/bin/cec-ctl' && test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-cec'"
+check "the button board's mute switch is the Pi's key (248), unless set otherwise" sh -c "! grep -q '^COMPANION_MUTE_KEY=' '$ROOT/etc/default/companion' || grep -q '^COMPANION_MUTE_KEY=248\$' '$ROOT/etc/default/companion'"
+check "an installer card's service is ready (it does nothing on other cards)" sh -c "test -x '$ROOT/usr/local/lib/companion-tvbox/companion-tvbox-install' && test -L '$ROOT/etc/systemd/system/multi-user.target.wants/companion-tvbox-install.service' && grep -q '^ConditionPathExists=/etc/companion/installer' '$ROOT/etc/systemd/system/companion-tvbox-install.service'"
+if [ "$INSTALLER" = 1 ]; then
+    check "an installer card for this box (number $MODEL_ID)" grep -qx "MODEL_ID=$MODEL_ID" "$ROOT/etc/companion/installer"
+    check "everything the community installer needs is inside (it fetches nothing)" sh -c "for t in tar hexdump mkfs.vfat mkfs.ext4 mkfs.btrfs parted losetup fdisk lsblk findmnt; do ls '$ROOT'/usr/bin/\$t '$ROOT'/usr/sbin/\$t >/dev/null 2>&1 || exit 1; done && test -x '$ROOT/usr/sbin/armbian-install'"
+else
+    check "not an installer card" sh -c "! test -e '$ROOT/etc/companion/installer'"
+fi
 check "no USB connection to a computer (the ports are for the microphone and button)" sh -c "grep -q '^COMPANION_USB=off' '$ROOT/etc/default/companion' && ! test -L '$ROOT/etc/systemd/system/multi-user.target.wants/companion-usb.service'"
 check "root's password is locked (Armbian's images come with 1234)" sh -c "grep '^root:' '$ROOT/etc/shadow' | cut -d: -f2 | grep -q '^[!*]'"
 check "no first-login questions" sh -c "! test -e '$ROOT/root/.not_logged_in_yet'"

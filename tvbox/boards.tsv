@@ -1,21 +1,23 @@
 # S905X3 TV boxes the TV box image can start on, and the device-tree file that describes each to Linux
 # (from ophub/amlogic-s9xxx-armbian's list, build-armbian/armbian-files/common-files/etc/model_database.conf).
 # build-image.sh --board KEY writes the file's name into the card's uEnv.txt; it can be changed there later
-# from any computer (tvbox/README.md, "If the network does not work").
-# key	device-tree file	the box
-x96-max-plus	meson-sm1-x96-max-plus.dtb	X96 Max Plus, gigabit Ethernet (4 GB, Realtek RTL8822CS Wi-Fi)
-x96-max-plus-100m	meson-sm1-x96-max-plus-100m.dtb	X96 Max Plus, 100 Mbit Ethernet
-x96-max-plus-ip1001m	meson-sm1-x96-max-plus-ip1001m.dtb	X96 Max Plus with the IP1001M network chip (Broadcom Wi-Fi)
-x96-max-plus-a100	meson-sm1-x96-max-plus-a100.dtb	X96 Max Plus A100 (100 Mbit)
-x96-max-plus-2101	meson-sm1-x96-max-plus-2101.dtb	X96 Max Plus 2101
-x96-max-plus-q1	meson-sm1-x96-max-plus-q1.dtb	X96 Max Plus Q1 (100 Mbit)
-x96-max-plus-q2	meson-sm1-x96-max-plus-q2.dtb	X96 Max Plus Q2, X96 Air Q1000
-x96-air-gbit	meson-sm1-x96-air-gbit.dtb	X96 Air, gigabit Ethernet
-x96-air	meson-sm1-x96-air.dtb	X96 Air (100 Mbit), X96 Max Plus 100W
-hk1-box	meson-sm1-hk1box-vontar-x3.dtb	HK1 Box, Vontar X3
-h96-max-x3	meson-sm1-h96-max-x3.dtb	H96 Max X3
-ugoos-x3	meson-sm1-ugoos-x3.dtb	Ugoos X3
-tx3	meson-sm1-tx3-qz.dtb	Tanix TX3, gigabit Ethernet
-tx3-100m	meson-sm1-tx3-bz.dtb	Tanix TX3, 100 Mbit Ethernet
-a95x-f3-air	meson-sm1-a95xf3-air-gbit.dtb	A95X F3 Air, gigabit Ethernet
-x88-pro-x3	meson-sm1-x88-pro-x3.dtb	X88 Pro X3, X99 Max Plus, Transpeed X3 Plus
+# from any computer (tvbox/README.md, "If something does not work"). The installer number is the box's number
+# in the community installer's list (armbian-install, the same file's first column), which an installer card
+# (build-image.sh --installer) answers it with when it copies itself onto the box's own memory.
+# key	device-tree file	installer number	the box
+x96-max-plus	meson-sm1-x96-max-plus.dtb	502	X96 Max Plus, gigabit Ethernet (4 GB, Realtek RTL8822CS Wi-Fi)
+x96-max-plus-100m	meson-sm1-x96-max-plus-100m.dtb	501	X96 Max Plus, 100 Mbit Ethernet
+x96-max-plus-ip1001m	meson-sm1-x96-max-plus-ip1001m.dtb	504	X96 Max Plus with the IP1001M network chip (Broadcom Wi-Fi)
+x96-max-plus-a100	meson-sm1-x96-max-plus-a100.dtb	505	X96 Max Plus A100 (100 Mbit)
+x96-max-plus-2101	meson-sm1-x96-max-plus-2101.dtb	506	X96 Max Plus 2101
+x96-max-plus-q1	meson-sm1-x96-max-plus-q1.dtb	507	X96 Max Plus Q1 (100 Mbit)
+x96-max-plus-q2	meson-sm1-x96-max-plus-q2.dtb	508	X96 Max Plus Q2, X96 Air Q1000
+x96-air-gbit	meson-sm1-x96-air-gbit.dtb	509	X96 Air, gigabit Ethernet
+x96-air	meson-sm1-x96-air.dtb	510	X96 Air (100 Mbit), X96 Max Plus 100W
+hk1-box	meson-sm1-hk1box-vontar-x3.dtb	512	HK1 Box, Vontar X3
+h96-max-x3	meson-sm1-h96-max-x3.dtb	514	H96 Max X3
+ugoos-x3	meson-sm1-ugoos-x3.dtb	516	Ugoos X3
+tx3	meson-sm1-tx3-qz.dtb	518	Tanix TX3, gigabit Ethernet
+tx3-100m	meson-sm1-tx3-bz.dtb	520	Tanix TX3, 100 Mbit Ethernet
+a95x-f3-air	meson-sm1-a95xf3-air-gbit.dtb	522	A95X F3 Air, gigabit Ethernet
+x88-pro-x3	meson-sm1-x88-pro-x3.dtb	524	X88 Pro X3, X99 Max Plus, Transpeed X3 Plus

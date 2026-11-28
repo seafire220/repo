@@ -1150,3 +1150,42 @@ rejected. Settled entries are not reopened without new evidence.
   real box (T1 to T10 in `15-hardware-test-plan.md`).
 - Rejected: copying `core/` and `stage/` into the folder (two copies would drift apart; a fix to memory or a
   character would have to be made twice); cage with a 4K picture; an Android app (for now).
+
+## D-077 — The desk device on a TV box: the Pi build's parts around the box
+
+- Date: 2026-11-28
+- Decision: the owner asked whether the TV box could take the Pi build's parts, "simply to use the TV box to make
+  it cheaper", and to find the parts to change and design around them (`38-tv-box-desk-device.md`).
+  - **Kept**: the ReSpeaker Lite, its speaker and cable, the buttons, mute switch and leads.
+  - **The screen**: the Touch Display 2 connects only to a Pi's DSI socket; the box has HDMI only. A **7" IPS
+    HDMI screen** (the Waveshare 7inch HDMI LCD (C), 1024×600, A$74.60) standing on its side. IPS, because a TN
+    screen turned on its side is unreadable from the side.
+  - **The buttons**: the box has no GPIO pins. A **USB button board** (a Raspberry Pi Pico H, A$8.65, or an
+    RP2040-Zero, running our CircuitPython files) sending usages Linux already maps: Play/Pause (already a box
+    button key) for listen, Power (systemd-logind switches the box off; sent only after a second's hold) and
+    Telephony Phone Mute held (KEY_MICMUTE, the Pi's own mute key). Consumer and telephony usages, not keyboard
+    keys, because Linux repeats held keyboard keys and a switch is held for days. Each control on two
+    neighbouring pins, one read and one held at 0 V, so no ground is spliced.
+  - **The core**: on the box the mute key is looked for too, and while any device holds it the microphone stays
+    off (a headset's mute press cannot undo the board's switch); `COMPANION_MUTE_KEY` for a switch that sends
+    another key. The Pi's behaviour is unchanged.
+  - **The picture**: the screen's own size, never more than 1920x1080 (a 7" screen gets its own 1024×600, a
+    third of 1080p's work, instead of a 1080p picture squeezed down; a 4K TV still gets 1080p), worked out
+    before Weston starts; turned with `--rotate`/`COMPANION_SCREEN_ROTATE`. An unedited earlier
+    `/etc/companion/weston.ini` (fixed at 1920x1080) is replaced on update.
+  - **No card per unit**: an **installer card** copies the device onto each box's own memory (the community
+    `armbian-install`, answered with the box's number, keeping the box's boot loader), clears the card's machine
+    identity from the copy, and switches the box off; it refuses a box already done.
+  - **Power**: one two-port USB charger, one port to the box's 5 V socket and one to the screen, so the box's
+    socket carries only the box, the ReSpeaker and the board (about 1.7 A at the loudest *est.*).
+- Why: about A$236 against the Pi build's A$273 with a screen of the same quality (A$37 less; about A$200, A$73
+  less, with a generic screen), and 4 GB of memory to the Pi's 1 GB; the saving is in the computer and what a Pi
+  needs besides (card, cooler, supply). Most of the Pi build's parts and all of its software carry over.
+- Not yet: any part bought or tried (T11 to T18); the screen's backlight stays on at night behind the black veil
+  (an HDMI screen's backlight is not Linux's to set; a Weston module that turns the picture off, or the
+  Waveshare's USB brightness, to try); one button for both on and off (needs a power latch).
+- Rejected: the **5.5" AMOLED** HDMI screen (1080×1920, A$195: too dear); the **Waveshare 5"** HDMI (A$89.70: more
+  than the 7"); a **TN** 7" screen; a **DragonRise "zero delay" arcade encoder** for the buttons (no firmware to
+  write, but joystick buttons, and the power button would need the core to switch the box off); **keyboard F13
+  and F14** from the board (held keys repeat); powering the screen **from the box's USB ports** (both are in use,
+  and the box's socket would carry everything).

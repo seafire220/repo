@@ -78,15 +78,31 @@ image with your SSH public key, so `check-on-box.sh` can be run; the support rep
 | # | Test | How | Pass |
 |---|---|---|---|
 | T1 | Starting from the card | The toothpick method (tvbox/README.md); time it | The setup screen within five minutes, every time from then on (and Android again with the card out) |
-| T2 | The picture | A 1080p TV, a 4K TV, a small monitor; the monitor on its side with `transform=rotate-90` | 1920x1080 on each (the support report's *screen*); nothing cut off with the TV's *Just Scan*; the tall picture when turned |
+| T2 | The picture | A 1080p TV, a 4K TV, a small monitor; the monitor on its side with `COMPANION_SCREEN_ROTATE=90` | 1920x1080 on the TVs (1080p, not 4K, on the 4K one), the monitor's own size on it (`check-on-box.sh` shows the mode chosen); nothing cut off with the TV's *Just Scan*; the tall picture when turned |
 | T3 | Ethernet | Plug in a cable before starting | The setup screen shows the address; the settings page opens. If not, change `FDT=` to the other X96 Max Plus file and note which your box needed |
 | T4 | Wi-Fi | Start with no cable | Note the support report's *wifi_driver*; whether the setup hotspot opens, and whether joining a network works |
 | T5 | Graphics | A 2D character, then a 3D avatar, for ten minutes each; then thirty minutes of talking | Note the frame rate (Animation tab) and the temperature (support report): 30 frames a second or more for 2D, 20 or more for 3D on a light drawing |
 | T6 | Sound | The ReSpeaker Lite; then no USB speaker (the TV's speakers) | Clear speech both ways with the ReSpeaker; the voice from the TV without it (if not, send the support report: its *sound_cards*) |
 | T7 | The remote | OK: press, then hold two seconds; volume up and down, held; mute; a USB keyboard's Enter | Listening starts and stops; the microphone goes off and on; the volume steps about four times a second while held; note the remote's model |
 | T8 | The TV's remote (HDMI-CEC) | `COMPANION_CEC=on` in /etc/default/companion; restart; switch the TV to the box | Note whether the TV lists "Companion", and whether its OK button starts listening |
-| T9 | Switching off, and updates | The remote's power button; then plug in again. Install an update file (Device tab) | It switches off cleanly and starts again; after the update the picture is still 1920x1080 (the Weston drop-in is kept) |
+| T9 | Switching off, and updates | The remote's power button; then plug in again. Install an update file (Device tab) | It switches off cleanly and starts again; after the update the picture is still the same size and turn (the Weston drop-in is kept) |
 | T10 | A day of use | Leave it running a day with Your day's clock, a wake-up and the weather | No restarts of the screen in `journalctl -u companion-stage`; memory steady (support report); the wake-up rings |
+
+### The desk device on a TV box (`38-tv-box-desk-device.md`)
+
+The Pi build's parts around the box: a 7" HDMI screen standing on its side, the ReSpeaker Lite, and the buttons on a
+USB button board (`tvbox/button-board/README.md`). Image: *Make a TV box image* with *screen: desk-90*.
+
+| # | Test | How | Pass |
+|---|---|---|---|
+| T11 | The 7" screen | Start with the Waveshare 7" (C) on its side | A sharp, upright picture filling the screen: `check-on-box.sh` shows `mode=1024x600` and `transform=rotate-90` (if upside down, build with desk-270). Note the screen's modes it lists |
+| T12 | Frame rate on it | As T5, on the 7" screen | Note the frame rate: it should be well above T5's on a 1080p TV (a third of the pixels) |
+| T13 | The button board | Plug it into the box's USB 2.0 port. Listen: press, hold 2 s, hold 12 s (then set up again). Mute switch on and off, and on while the box starts. Power: a knock, then held a second | Listening, microphone and reset as on the Pi; the crossed-out microphone follows the switch, also when it was on at the start; a knock does nothing, held a second the box switches off cleanly (`journalctl -b -1 -u systemd-logind` shows "Power key pressed") |
+| T14 | The screen at night | Set the night hours to now (Device tab) | Note whether the screen's backlight stays on behind the black veil (expected: yes, for now); try the screen's backlight switch |
+| T15 | Replies with the device's own voice | No voice service key (the device's own voice); ask five short questions | Note the time from the end of speech to the start of the reply, against a Pi 5's |
+| T16 | The installer card | Make one (*installer* ticked); start a new box from it with the toothpick | The screen says what it is doing; it switches off by itself within fifteen minutes; with the card out it starts from its own memory at the setup screen; `check-on-box.sh` shows it started from mmcblk...p2 with boot0 beside it. Then put the card in again: it says the box already has the device, and changes nothing |
+| T17 | Power at full volume | The two-port charger; volume at full; a long answer | No restart, no flicker, no `Undervoltage` or USB resets in `journalctl -k`; note the charger used |
+| T18 | Wi-Fi on the box | As T4, on each new batch of boxes | Note the Wi-Fi driver (support report) and whether setup works without a cable |
 
 ## Things to measure and feed back
 

@@ -1,8 +1,14 @@
 # --- TV box (added by tvbox/install.sh; tvbox/README.md) ---
 # The button: the remote's OK, the TV remote's Select (through HDMI-CEC, if turned on below), Enter on a USB
-# button or keyboard, the keypad's Enter, Play/Pause; on any input device that has one of them.
+# button or keyboard, the keypad's Enter, Play/Pause (the desk device's button board); on any input device that
+# has one of them. The button board's mute switch holds down key 248, as the Pi's does (COMPANION_MUTE_KEY to
+# change it).
 COMPANION_BUTTON=any
 COMPANION_BUTTON_KEYS=352,353,28,96,164
+# The screen: its own size, but never more than 1920x1080 (or remove the # and give a size); and the picture
+# turned for a screen standing on its side (90, or 270 if it is upside down).
+#COMPANION_SCREEN_MODE=1280x720
+#COMPANION_SCREEN_ROTATE=90
 # The remote's volume keys change the volume, and its mute key turns the microphone off or on.
 COMPANION_REMOTE_KEYS=1
 # No USB connection to a computer: the box's USB ports are for the microphone, speaker and button.

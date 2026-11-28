@@ -35,6 +35,17 @@ on:
         required: true
         default: "6.12"
         type: string
+      screen:
+        description: "The screen: a TV (or monitor) as it stands, or the desk device's screen standing on its side (docs/38-tv-box-desk-device.md; 270 if the picture comes out upside down)"
+        required: true
+        default: tv
+        type: choice
+        options: [tv, desk-90, desk-270]
+      installer:
+        description: "An installer card: it copies itself onto each box's own memory (erasing Android) and switches the box off, so units need no card (tvbox/README.md, \"Making many\")"
+        required: false
+        default: false
+        type: boolean
       ssh_public_key:
         description: "For testing only: a public key (ssh-ed25519 AAAA...) that may log in as root over SSH. Leave empty for an image to sell"
         required: false
@@ -58,11 +69,15 @@ jobs:
       contents: write          # for the release; the token is given to that step only
     steps:
       - name: Check the inputs
+        id: inputs
         env:
           VERSION: ${{ inputs.version }}
+          BOARD: ${{ inputs.board }}
           KERNEL: ${{ inputs.kernel }}
           TAG: ${{ inputs.armbian_release }}
           KEY: ${{ inputs.ssh_public_key }}
+          SCREEN: ${{ inputs.screen }}
+          INSTALLER: ${{ inputs.installer }}
         run: |
           if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){0,4}$'; then
             echo "::error::A version is numbers with dots, such as 2026.11.28"; exit 1
@@ -76,6 +91,15 @@ jobs:
           if [ -n "$KEY" ] && ! printf '%s' "$KEY" | grep -Eq '^(ssh-(ed25519|rsa)|ecdsa-sha2-[a-z0-9-]+) [A-Za-z0-9+/=]+( [^ ]*)?$'; then
             echo "::error::The SSH key must be one public key line, such as ssh-ed25519 AAAA... you@laptop"; exit 1
           fi
+          # The image's name says what it is: companion-tvbox-VERSION-BOARD[-desk-90][-installer].img
+          stem="companion-tvbox-$VERSION-$BOARD"
+          case "$SCREEN" in
+            tv) ;;
+            desk-90|desk-270) stem="$stem-$SCREEN" ;;
+            *) echo "::error::The screen is tv, desk-90 or desk-270"; exit 1 ;;
+          esac
+          if [ "$INSTALLER" = true ]; then stem="$stem-installer"; fi
+          echo "stem=$stem" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
@@ -142,43 +166,51 @@ jobs:
           BOARD: ${{ inputs.board }}
           NAME: ${{ steps.find.outputs.name }}
           KEY: ${{ inputs.ssh_public_key }}
+          SCREEN: ${{ inputs.screen }}
+          INSTALLER: ${{ inputs.installer }}
+          STEM: ${{ steps.inputs.outputs.stem }}
         run: |
           extra=()
           if [ -n "$KEY" ]; then
             printf '%s\n' "$KEY" > "$RUNNER_TEMP/maker-key.pub"
             extra=(--ssh-key "$RUNNER_TEMP/maker-key.pub")
           fi
-          sudo ./tvbox/build-image.sh "$RUNNER_TEMP/$NAME" "$RUNNER_TEMP/companion-tvbox-$VERSION-$BOARD.img" \
+          case "$SCREEN" in desk-*) extra+=(--rotate "${SCREEN#desk-}") ;; esac
+          if [ "$INSTALLER" = true ]; then extra+=(--installer); fi
+          sudo ./tvbox/build-image.sh "$RUNNER_TEMP/$NAME" "$RUNNER_TEMP/$STEM.img" \
               --version "$VERSION" --board "$BOARD" --stage-binary stage/target/release/stage "${extra[@]}"
           sudo rm -f "$RUNNER_TEMP/$NAME"
 
       - name: Check the image
         env:
-          VERSION: ${{ inputs.version }}
           BOARD: ${{ inputs.board }}
           KEY: ${{ inputs.ssh_public_key }}
+          SCREEN: ${{ inputs.screen }}
+          INSTALLER: ${{ inputs.installer }}
+          STEM: ${{ steps.inputs.outputs.stem }}
         run: |
           extra=()
           if [ -n "$KEY" ]; then extra=(--with-ssh-key); fi
-          sudo ./tvbox/check-image.sh "$RUNNER_TEMP/companion-tvbox-$VERSION-$BOARD.img" --board "$BOARD" "${extra[@]}"
+          case "$SCREEN" in desk-*) extra+=(--rotate "${SCREEN#desk-}") ;; esac
+          if [ "$INSTALLER" = true ]; then extra+=(--installer); fi
+          sudo ./tvbox/check-image.sh "$RUNNER_TEMP/$STEM.img" --board "$BOARD" "${extra[@]}"
 
       - name: Compress it
         env:
-          VERSION: ${{ inputs.version }}
-          BOARD: ${{ inputs.board }}
+          STEM: ${{ steps.inputs.outputs.stem }}
         run: |
           cd "$RUNNER_TEMP"
-          sudo chown "$(id -u):$(id -g)" "companion-tvbox-$VERSION-$BOARD.img"
-          xz -T0 "companion-tvbox-$VERSION-$BOARD.img"
-          sha256sum "companion-tvbox-$VERSION-$BOARD.img.xz" > "companion-tvbox-$VERSION-$BOARD.img.xz.sha256"
-          ls -l "companion-tvbox-$VERSION-$BOARD.img.xz"
+          sudo chown "$(id -u):$(id -g)" "$STEM.img"
+          xz -T0 "$STEM.img"
+          sha256sum "$STEM.img.xz" > "$STEM.img.xz.sha256"
+          ls -l "$STEM.img.xz"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: companion-tvbox-image-${{ inputs.version }}-${{ inputs.board }}
+          name: ${{ steps.inputs.outputs.stem }}
           path: |
-            ${{ runner.temp }}/companion-tvbox-${{ inputs.version }}-${{ inputs.board }}.img.xz
-            ${{ runner.temp }}/companion-tvbox-${{ inputs.version }}-${{ inputs.board }}.img.xz.sha256
+            ${{ runner.temp }}/${{ steps.inputs.outputs.stem }}.img.xz
+            ${{ runner.temp }}/${{ steps.inputs.outputs.stem }}.img.xz.sha256
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
@@ -193,21 +225,29 @@ jobs:
           DIGEST: ${{ steps.find.outputs.digest }}
           TAG_BASE: ${{ inputs.armbian_release }}
           KEY: ${{ inputs.ssh_public_key }}
+          SCREEN: ${{ inputs.screen }}
+          INSTALLER: ${{ inputs.installer }}
+          STEM: ${{ steps.inputs.outputs.stem }}
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$RUNNER_TEMP"
-          file="companion-tvbox-$VERSION-$BOARD.img.xz"
+          file="$STEM.img.xz"
           if [ "$(stat -c %s "$file")" -ge 2147483648 ]; then
             echo "::error::The image is 2 GB or more, which is more than a GitHub release file can be. It is under Artifacts."
             exit 1
           fi
           access="No remote login: nobody can log in to it."
           if [ -n "$KEY" ]; then access="**A test image**: the SSH key given when it was built may log in as root (and only that key)."; fi
+          kind="For a TV or monitor as it stands."
+          case "$SCREEN" in desk-*) kind="For the desk device: the picture turned ${SCREEN#desk-} degrees for its screen standing on its side (docs/38-tv-box-desk-device.md)." ;; esac
+          if [ "$INSTALLER" = true ]; then
+            kind="$kind **An installer card**: start each box from it once (with the toothpick); it copies itself onto the box's own memory, erasing Android, and switches the box off. Take the card out and the unit starts from its own memory (tvbox/README.md, \"Making many\")."
+          fi
           cat > notes.md <<EOF
           Card image of the device for TV boxes with the Amlogic S905X3 chip, software version $VERSION
           (tvbox/README.md). **A test image: not for sale yet** (tvbox/README.md, "Before selling").
 
-          **companion-tvbox-$VERSION-$BOARD.img.xz**: for the $BOARD (tvbox/boards.tsv). Write it to a microSD card
+          **$file**: for the $BOARD (tvbox/boards.tsv). $kind Write it to a microSD card
           with balenaEtcher or Raspberry Pi Imager ("Use custom"), then start the box from the card: tvbox/README.md,
           "Starting the box from the card". Its checksum is in the .sha256 file. $access
 
@@ -228,4 +268,4 @@ jobs:
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
                 --title "TV box image $VERSION" --notes-file notes.md --latest=false $flags "$file" "$file.sha256"
           fi
-          echo "### TV box image $VERSION for $BOARD: release $tag ($MODE)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### TV box image $VERSION ($file): release $tag ($MODE)" >> "$GITHUB_STEP_SUMMARY"
